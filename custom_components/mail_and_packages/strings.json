@@ -57,11 +57,13 @@
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
           "post_de_custom_img": "Use custom Post DE 'no mail' image?",
           "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)",
-          "exchange_mode": "Microsoft Exchange / Outlook compatibility mode"
+          "exchange_mode": "Microsoft Exchange / Outlook compatibility mode",
+          "registry_enabled": "Enable persistent package registry"
         },
         "data_description": {
           "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
-          "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching)."
+          "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching).",
+          "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local."
         },
         "description": "Finish the configuration by customizing the following based on your email structure and Home Assistant installation.\n\nIf using Amazon forwarded emails please separate each address with a comma.",
         "title": "Mail and Packages (Step 2 of 2)"
@@ -132,10 +134,12 @@
           "walmart_custom_img": "Use custom 'no Walmart delivery' image?",
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
           "post_de_custom_img": "Use custom Post DE 'no mail' image?",
-          "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)"
+          "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)",
+          "registry_enabled": "Enable persistent package registry"
         },
         "data_description": {
-          "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster."
+          "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
+          "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local."
         },
         "description": "Finish the configuration by customizing the following based on your email structure and Home Assistant installation.\n\nIf using Amazon forwarded emails please separate each address with a comma or enter (none) to clear this setting.",
         "title": "Mail and Packages (Step 2 of 2)"
@@ -215,11 +219,13 @@
           "fedex_custom_img": "Use custom 'no FedEx delivery' image?",
           "post_de_custom_img": "Use custom Post DE 'no mail' image?",
           "allow_forwarded_emails": "Allow forwarded emails in addition to a service's default (e.g. no-reply@usps.com)",
-          "exchange_mode": "Microsoft Exchange / Outlook compatibility mode"
+          "exchange_mode": "Microsoft Exchange / Outlook compatibility mode",
+          "registry_enabled": "Enable persistent package registry"
         },
         "data_description": {
           "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
-          "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching)."
+          "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching).",
+          "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local."
         },
         "title": "Mail and Packages Options"
       },
