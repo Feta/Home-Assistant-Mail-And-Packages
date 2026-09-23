@@ -21,6 +21,7 @@ from custom_components.mail_and_packages.const import (
     CONF_FEDEX_CUSTOM_IMG_FILE,
     CONF_FOLDER,
     CONF_FORWARDED_EMAILS,
+    CONF_FORWARD_TO_SEVENTEENTRACK,
     CONF_FORWARDING_HEADER,
     CONF_GENERATE_MP4,
     CONF_GENERIC_CUSTOM_IMG,
@@ -28,6 +29,7 @@ from custom_components.mail_and_packages.const import (
     CONF_POST_DE_CUSTOM_IMG,
     CONF_POST_DE_CUSTOM_IMG_FILE,
     CONF_REGISTRY_ENABLED,
+    CONF_SEVENTEENTRACK_CONFIG_ENTRY,
     CONF_STORAGE,
     CONF_UPS_CUSTOM_IMG,
     CONF_UPS_CUSTOM_IMG_FILE,
@@ -225,8 +227,17 @@ async def _validate_forwarded_emails(user_input: dict, errors: dict) -> None:
         errors[CONF_FORWARDED_EMAILS] = status[0]
 
 
-def _normalize_registry_option(user_input: dict) -> None:
-    """Persist the registry option only when explicitly enabled."""
+def _normalize_tracking_options(user_input: dict) -> None:
+    """Normalize registry and tracking-forwarding options."""
+    forward_enabled = bool(user_input.get(CONF_FORWARD_TO_SEVENTEENTRACK, False))
+
+    if forward_enabled:
+        # Persistent registry state is required to make forwarding idempotent.
+        user_input[CONF_REGISTRY_ENABLED] = True
+    else:
+        user_input.pop(CONF_FORWARD_TO_SEVENTEENTRACK, None)
+        user_input.pop(CONF_SEVENTEENTRACK_CONFIG_ENTRY, None)
+
     if not user_input.get(CONF_REGISTRY_ENABLED, False):
         user_input.pop(CONF_REGISTRY_ENABLED, None)
 
@@ -242,7 +253,7 @@ async def _validate_user_input(
 
     errors = {}
 
-    _normalize_registry_option(user_input)
+    _normalize_tracking_options(user_input)
 
     await _validate_amazon_fwds(user_input, errors)
 
