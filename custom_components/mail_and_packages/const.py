@@ -95,6 +95,11 @@ CONF_CUSTOM_DAYS = "custom_days"
 CONF_USPS_PLACEHOLDER = "usps_placeholder"
 CONF_EXCHANGE_MODE = "exchange_mode"
 
+# Persistent package registry
+CONF_REGISTRY_ENABLED = "registry_enabled"
+CONF_REGISTRY_DELIVERED_DAYS = "registry_delivered_days"
+CONF_REGISTRY_DETECTED_DAYS = "registry_detected_days"
+
 # Defaults
 DEFAULT_CAMERA_NAME = "Mail USPS Camera"
 DEFAULT_NAME = "Mail And Packages"
@@ -148,6 +153,14 @@ DEFAULT_FORWARDED_EMAILS = "(none)"
 DEFAULT_FORWARDING_HEADER = "(none)"
 DEFAULT_USPS_PLACEHOLDER = True
 DEFAULT_EXCHANGE_MODE = False
+DEFAULT_REGISTRY_ENABLED = False
+DEFAULT_REGISTRY_DELIVERED_DAYS = 3
+DEFAULT_REGISTRY_DETECTED_DAYS = 14
+REGISTRY_SENSOR_KEYS: Final[tuple[str, ...]] = (
+    "registry_tracked",
+    "registry_in_transit",
+    "registry_delivered",
+)
 
 # Amazon
 AMAZON_DOMAINS = [
@@ -1368,6 +1381,25 @@ SENSOR_TYPES: Final[dict[str, SensorEntityDescription]] = {
         key="mail_updated",
         entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.TIMESTAMP,
+    ),
+    # Persistent package registry
+    "registry_tracked": SensorEntityDescription(
+        name="Mail Registry Tracked",
+        native_unit_of_measurement="package(s)",
+        icon="mdi:package-variant",
+        key="registry_tracked",
+    ),
+    "registry_in_transit": SensorEntityDescription(
+        name="Mail Registry In Transit",
+        native_unit_of_measurement="package(s)",
+        icon="mdi:truck-delivery",
+        key="registry_in_transit",
+    ),
+    "registry_delivered": SensorEntityDescription(
+        name="Mail Registry Delivered",
+        native_unit_of_measurement="package(s)",
+        icon="mdi:package-variant-closed-check",
+        key="registry_delivered",
     ),
     # USPS
     "usps_mail": SensorEntityDescription(
