@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -24,6 +24,7 @@ class PackageRegistry:
     """Persist package lifecycle state across restarts."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        """Initialize persistent storage for one config entry."""
         self._store = Store(
             hass,
             STORAGE_VERSION,
@@ -35,13 +36,16 @@ class PackageRegistry:
 
     @staticmethod
     def normalize_tracking_number(tracking_number: str) -> str:
+        """Normalize a tracking number for stable registry keys."""
         return str(tracking_number).strip().upper()
 
     @property
     def packages(self) -> dict[str, dict[str, Any]]:
+        """Return all package records, including cleared records."""
         return self._packages
 
     async def async_load(self) -> None:
+        """Load registry data from Home Assistant storage once."""
         if self._loaded:
             return
         data = await self._store.async_load()
@@ -51,11 +55,13 @@ class PackageRegistry:
         self._loaded = True
 
     async def async_save(self) -> None:
+        """Persist current registry data."""
         await self._store.async_save(
             {"packages": self._packages, "processed_uids": self._processed_uids}
         )
 
     async def async_remove(self) -> None:
+        """Remove registry storage for this config entry."""
         await self._store.async_remove()
 
     def register_package(
@@ -67,13 +73,14 @@ class PackageRegistry:
         source_from: str = "",
         description: str = "",
     ) -> bool:
+        """Add a package or advance an existing package to a later state."""
         if status not in STATUS_RANK:
             raise ValueError(f"Unsupported package status: {status}")
         tracking = self.normalize_tracking_number(tracking_number)
         if not tracking:
             return False
         carrier = str(carrier or "unknown").strip().lower()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         if tracking in self._packages:
             existing = self._packages[tracking]
@@ -112,17 +119,19 @@ class PackageRegistry:
         return True
 
     def clear_package(self, tracking_number: str) -> bool:
+        """Mark a package as cleared and suppress automatic re-detection."""
         tracking = self.normalize_tracking_number(tracking_number)
         package = self._packages.get(tracking)
         if not package or package.get("status") == "cleared":
             return False
         package["status"] = "cleared"
-        package["last_updated"] = datetime.now(timezone.utc).isoformat()
+        package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
     def clear_all_delivered(self) -> int:
+        """Mark all delivered packages as cleared and return the count."""
         count = 0
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for package in self._packages.values():
             if package.get("status") == "delivered":
                 package["status"] = "cleared"
@@ -131,16 +140,18 @@ class PackageRegistry:
         return count
 
     def mark_delivered(self, tracking_number: str) -> bool:
+        """Manually advance a package to delivered."""
         tracking = self.normalize_tracking_number(tracking_number)
         package = self._packages.get(tracking)
         if not package or package.get("status") in ("delivered", "cleared"):
             return False
         package["status"] = "delivered"
         package["exception"] = False
-        package["last_updated"] = datetime.now(timezone.utc).isoformat()
+        package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
     def add_package(self, tracking_number: str, carrier: str = "unknown") -> bool:
+        """Manually add a package or explicitly re-add a cleared package."""
         tracking = self.normalize_tracking_number(tracking_number)
         if not tracking:
             return False
@@ -156,7 +167,7 @@ class PackageRegistry:
                     "source": "manual",
                     "source_from": "",
                     "description": "Manually added",
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "last_updated": datetime.now(UTC).isoformat(),
                     "carrier_confirmed": False,
                 }
             )
@@ -170,6 +181,7 @@ class PackageRegistry:
         )
 
     def set_exception(self, tracking_number: str, value: bool = True) -> bool:
+        """Set or clear the exception flag for an active package."""
         tracking = self.normalize_tracking_number(tracking_number)
         package = self._packages.get(tracking)
         if not package or package.get("status") == "cleared":
@@ -177,12 +189,13 @@ class PackageRegistry:
         if package.get("exception") == value:
             return False
         package["exception"] = value
-        package["last_updated"] = datetime.now(timezone.utc).isoformat()
+        package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
     def reconcile_tracking_details(
         self, tracking_details: dict[str, list[str]]
     ) -> list[dict[str, Any]]:
+        """Reconcile carrier-parser tracking output into registry state."""
         transitions: list[dict[str, Any]] = []
         for suffix, status in (
             ("_delivering", "in_transit"),
@@ -224,7 +237,8 @@ class PackageRegistry:
         detected_days: int = 14,
         cleared_days: int = 30,
     ) -> int:
-        now = datetime.now(timezone.utc)
+        """Remove stale delivered, cleared, and unconfirmed detected records."""
+        now = datetime.now(UTC)
         to_remove: list[str] = []
         for tracking, package in self._packages.items():
             try:
@@ -233,14 +247,14 @@ class PackageRegistry:
                 continue
             age_days = (now - last_updated).days
             status = package.get("status", "detected")
-            if status == "delivered" and age_days >= delivered_days:
-                to_remove.append(tracking)
-            elif status == "cleared" and age_days >= cleared_days:
-                to_remove.append(tracking)
-            elif (
-                status == "detected"
-                and not package.get("carrier_confirmed")
-                and age_days >= detected_days
+            if (
+                (status == "delivered" and age_days >= delivered_days)
+                or (status == "cleared" and age_days >= cleared_days)
+                or (
+                    status == "detected"
+                    and not package.get("carrier_confirmed")
+                    and age_days >= detected_days
+                )
             ):
                 to_remove.append(tracking)
         for tracking in to_remove:
@@ -248,6 +262,7 @@ class PackageRegistry:
         return len(to_remove)
 
     def get_counts(self) -> dict[str, int]:
+        """Return tracked, in-transit, and delivered package counts."""
         counts = {"tracked": 0, "in_transit": 0, "delivered": 0}
         for package in self._packages.values():
             status = package.get("status", "detected")
@@ -260,7 +275,10 @@ class PackageRegistry:
                 counts["delivered"] += 1
         return counts
 
-    def get_packages_list(self, status_filter: str | None = None) -> list[dict[str, Any]]:
+    def get_packages_list(
+        self, status_filter: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return dashboard-friendly package records, optionally filtered."""
         result: list[dict[str, Any]] = []
         for tracking, package in self._packages.items():
             status = package.get("status", "detected")
@@ -289,6 +307,7 @@ class PackageRegistry:
         return result
 
     def coordinator_data(self) -> dict[str, Any]:
+        """Return registry data shaped for coordinator-backed sensors."""
         counts = self.get_counts()
         return {
             "registry_tracked": counts["tracked"],
