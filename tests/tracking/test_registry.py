@@ -127,6 +127,16 @@ async def test_auto_expire(registry):
 
 
 @pytest.mark.asyncio
+async def test_manual_mark_and_clear(registry):
+    await registry.async_load()
+    registry.add_package("1ZMANUAL", "ups")
+    assert registry.mark_delivered("1zmanual")
+    assert registry.packages["1ZMANUAL"]["status"] == "delivered"
+    assert registry.clear_package("1zmanual")
+    assert registry.packages["1ZMANUAL"]["status"] == "cleared"
+
+
+@pytest.mark.asyncio
 async def test_save_and_remove(registry, mock_store):
     await registry.async_load()
     registry.add_package("1Z123", "ups")
