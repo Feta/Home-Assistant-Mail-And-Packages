@@ -27,6 +27,7 @@ from custom_components.mail_and_packages.const import (
     CONF_GENERIC_CUSTOM_IMG_FILE,
     CONF_POST_DE_CUSTOM_IMG,
     CONF_POST_DE_CUSTOM_IMG_FILE,
+    CONF_REGISTRY_ENABLED,
     CONF_STORAGE,
     CONF_UPS_CUSTOM_IMG,
     CONF_UPS_CUSTOM_IMG_FILE,
@@ -234,6 +235,11 @@ async def _validate_user_input(
     check_ffmpeg = _get_target("_check_ffmpeg", default_check_ffmpeg)
 
     errors = {}
+
+    # Keep disabled registry behavior backward-compatible with existing entries.
+    # The key is only persisted when the feature is explicitly enabled.
+    if not user_input.get(CONF_REGISTRY_ENABLED, False):
+        user_input.pop(CONF_REGISTRY_ENABLED, None)
 
     await _validate_amazon_fwds(user_input, errors)
 
