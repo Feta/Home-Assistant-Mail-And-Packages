@@ -35,6 +35,7 @@ from custom_components.mail_and_packages.const import (
     CONF_EXCHANGE_MODE,
     CONF_FEDEX_CUSTOM_IMG,
     CONF_FOLDER,
+    CONF_FORWARD_TO_SEVENTEENTRACK,
     CONF_GENERATE_GRID,
     CONF_GENERATE_MP4,
     CONF_GENERIC_CUSTOM_IMG,
@@ -43,12 +44,14 @@ from custom_components.mail_and_packages.const import (
     CONF_POST_DE_CUSTOM_IMG,
     CONF_REGISTRY_ENABLED,
     CONF_SCAN_INTERVAL,
+    CONF_SEVENTEENTRACK_CONFIG_ENTRY,
     CONF_UPS_CUSTOM_IMG,
     CONF_USPS_PLACEHOLDER,
     CONF_VERIFY_SSL,
     CONF_WALMART_CUSTOM_IMG,
     DEFAULT_CUSTOM_DAYS,
     DEFAULT_EXCHANGE_MODE,
+    DEFAULT_FORWARD_TO_SEVENTEENTRACK,
     DEFAULT_REGISTRY_ENABLED,
     DEFAULT_USPS_PLACEHOLDER,
     DEFAULT_VERIFY_SSL,
@@ -230,11 +233,10 @@ def _build_step_2_schema(
     get_default: Any,
 ) -> vol.Schema:
     """Build voluptuous schema for step 2 configuration."""
-    return vol.Schema(
-        {
-            vol.Required(CONF_FOLDER, default=default_folder): multi_folder_select(
-                {m: m for m in mailboxes}
-            ),
+    schema: dict[Any, Any] = {
+        vol.Required(CONF_FOLDER, default=default_folder): multi_folder_select(
+            {m: m for m in mailboxes}
+        ),
             vol.Required(
                 CONF_RESOURCES,
                 default=get_default(CONF_RESOURCES),
@@ -255,30 +257,48 @@ def _build_step_2_schema(
                 CONF_DURATION,
                 default=get_default(CONF_DURATION),
             ): vol.Coerce(int),
-            **{
-                vol.Optional(
-                    key,
-                    default=get_default(key, default_val),
-                ): cv.boolean
-                for key, default_val in [
-                    (CONF_ALLOW_FORWARDED_EMAILS, False),
-                    (CONF_EXCHANGE_MODE, DEFAULT_EXCHANGE_MODE),
-                    (CONF_REGISTRY_ENABLED, DEFAULT_REGISTRY_ENABLED),
-                    (CONF_GENERATE_GRID, False),
-                    (CONF_GENERATE_MP4, False),
-                    (CONF_USPS_PLACEHOLDER, DEFAULT_USPS_PLACEHOLDER),
-                    (CONF_ALLOW_EXTERNAL, False),
-                    (CONF_CUSTOM_IMG, False),
-                    (CONF_AMAZON_CUSTOM_IMG, False),
-                    (CONF_UPS_CUSTOM_IMG, False),
-                    (CONF_WALMART_CUSTOM_IMG, False),
-                    (CONF_FEDEX_CUSTOM_IMG, False),
-                    (CONF_GENERIC_CUSTOM_IMG, False),
-                    (CONF_POST_DE_CUSTOM_IMG, False),
-                ]
-            },
+        **{
+            vol.Optional(
+                key,
+                default=get_default(key, default_val),
+            ): cv.boolean
+            for key, default_val in [
+                (CONF_ALLOW_FORWARDED_EMAILS, False),
+                (CONF_EXCHANGE_MODE, DEFAULT_EXCHANGE_MODE),
+                (CONF_REGISTRY_ENABLED, DEFAULT_REGISTRY_ENABLED),
+                (
+                    CONF_FORWARD_TO_SEVENTEENTRACK,
+                    DEFAULT_FORWARD_TO_SEVENTEENTRACK,
+                ),
+                (CONF_GENERATE_GRID, False),
+                (CONF_GENERATE_MP4, False),
+                (CONF_USPS_PLACEHOLDER, DEFAULT_USPS_PLACEHOLDER),
+                (CONF_ALLOW_EXTERNAL, False),
+                (CONF_CUSTOM_IMG, False),
+                (CONF_AMAZON_CUSTOM_IMG, False),
+                (CONF_UPS_CUSTOM_IMG, False),
+                (CONF_WALMART_CUSTOM_IMG, False),
+                (CONF_FEDEX_CUSTOM_IMG, False),
+                (CONF_GENERIC_CUSTOM_IMG, False),
+                (CONF_POST_DE_CUSTOM_IMG, False),
+            ]
         },
+    }
+
+    configured_entry = get_default(CONF_SEVENTEENTRACK_CONFIG_ENTRY)
+    entry_key = (
+        vol.Optional(
+            CONF_SEVENTEENTRACK_CONFIG_ENTRY,
+            default=configured_entry,
+        )
+        if configured_entry
+        else vol.Optional(CONF_SEVENTEENTRACK_CONFIG_ENTRY)
     )
+    schema[entry_key] = selector.ConfigEntrySelector(
+        {"integration": "seventeentrack"}
+    )
+
+    return vol.Schema(schema)
 
 
 # Re-export advanced schemas from schemas_advanced
