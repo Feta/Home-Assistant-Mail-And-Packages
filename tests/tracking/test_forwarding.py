@@ -17,9 +17,7 @@ from custom_components.mail_and_packages.tracking.registry import PackageRegistr
 @pytest.fixture
 def registry():
     """Create an in-memory package registry."""
-    with patch(
-        "custom_components.mail_and_packages.tracking.registry.Store"
-    ):
+    with patch("custom_components.mail_and_packages.tracking.registry.Store"):
         yield PackageRegistry(MagicMock(), "entry")
 
 
@@ -38,10 +36,7 @@ def test_resolve_explicit_seventeentrack_entry():
     """Configured 17TRACK entry should be used when it is valid."""
     hass, entry = _hass_with_entry()
 
-    assert (
-        resolve_seventeentrack_config_entry(hass, entry.entry_id)
-        == entry.entry_id
-    )
+    assert resolve_seventeentrack_config_entry(hass, entry.entry_id) == entry.entry_id
 
 
 def test_resolve_single_seventeentrack_entry():
