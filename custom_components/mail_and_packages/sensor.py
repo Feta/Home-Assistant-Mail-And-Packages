@@ -41,6 +41,7 @@ from .const import (
     CONF_PATH,
     DOMAIN,
     IMAGE_SENSORS,
+    REGISTRY_SENSOR_KEYS,
     SENSOR_TYPES,
     VERSION,
 )
@@ -64,6 +65,12 @@ async def async_setup_entry(
         for variable in resources
         if variable in SENSOR_TYPES
     ]
+
+    if coordinator.registry is not None:
+        sensors.extend(
+            RegistrySensor(entry, SENSOR_TYPES[key], coordinator)
+            for key in REGISTRY_SENSOR_KEYS
+        )
 
     sensors.extend(
         ImagePathSensors(hass, entry, value, coordinator)
@@ -199,6 +206,23 @@ class PackagesSensor(CoordinatorEntity, RestoreSensor):
         elif self.type == AMAZON_OTP:
             if code := data.get(AMAZON_OTP_CODE, data.get(ATTR_CODE)):
                 attr[ATTR_CODE] = code
+
+
+class RegistrySensor(PackagesSensor):
+    """Summary sensor backed by the persistent package registry."""
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return package records for this registry view."""
+        data = self.coordinator.data or {}
+        attr_key = {
+            "registry_tracked": "registry_packages_list",
+            "registry_in_transit": "registry_in_transit_list",
+            "registry_delivered": "registry_delivered_list",
+        }.get(self.type)
+        if not attr_key:
+            return {}
+        return {"packages": data.get(attr_key, [])}
 
 
 class ImagePathSensors(CoordinatorEntity, RestoreSensor):
