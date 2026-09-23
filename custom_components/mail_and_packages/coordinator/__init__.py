@@ -27,11 +27,14 @@ from custom_components.mail_and_packages.const import (
     CONF_ALLOW_EXTERNAL,
     CONF_AUTH_TYPE,
     CONF_CUSTOM_DAYS,
+    CONF_FORWARD_TO_SEVENTEENTRACK,
     CONF_IMAP_TIMEOUT,
     CONF_REGISTRY_DELIVERED_DAYS,
     CONF_REGISTRY_DETECTED_DAYS,
     CONF_REGISTRY_ENABLED,
+    CONF_SEVENTEENTRACK_CONFIG_ENTRY,
     DEFAULT_CUSTOM_DAYS,
+    DEFAULT_FORWARD_TO_SEVENTEENTRACK,
     DEFAULT_IMAP_TIMEOUT,
     DEFAULT_REGISTRY_DELIVERED_DAYS,
     DEFAULT_REGISTRY_DETECTED_DAYS,
@@ -40,7 +43,10 @@ from custom_components.mail_and_packages.const import (
 )
 from custom_components.mail_and_packages.helpers import copy_images
 from custom_components.mail_and_packages.shippers import get_shipper_for_sensor
-from custom_components.mail_and_packages.tracking import PackageRegistry
+from custom_components.mail_and_packages.tracking import (
+    PackageRegistry,
+    async_forward_pending_to_seventeentrack,
+)
 from custom_components.mail_and_packages.utils.cache import EmailCache
 from custom_components.mail_and_packages.utils.image import (
     default_image_path,
@@ -300,9 +306,34 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 DEFAULT_REGISTRY_DETECTED_DAYS,
             ),
         )
+        forwarding_changes = 0
+        if self.config.get(
+            CONF_FORWARD_TO_SEVENTEENTRACK,
+            DEFAULT_FORWARD_TO_SEVENTEENTRACK,
+        ):
+            forwarding_result = await async_forward_pending_to_seventeentrack(
+                self.hass,
+                self.registry,
+                self.config.get(CONF_SEVENTEENTRACK_CONFIG_ENTRY),
+            )
+            forwarding_changes = (
+                forwarding_result.forwarded + forwarding_result.existing_remote
+            )
+            if not forwarding_result.service_available:
+                _LOGGER.debug(
+                    "17TRACK forwarding is enabled but no usable 17TRACK service "
+                    "and config entry are currently available"
+                )
+            elif forwarding_result.failed:
+                _LOGGER.warning(
+                    "17TRACK forwarding completed with %s failed package(s); "
+                    "they will be retried",
+                    forwarding_result.failed,
+                )
+
         data.update(self.registry.coordinator_data())
 
-        if transitions or expired:
+        if transitions or expired or forwarding_changes:
             await self.registry.async_save()
 
         for transition in transitions:
