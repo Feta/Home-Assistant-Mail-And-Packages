@@ -99,6 +99,8 @@ CONF_EXCHANGE_MODE = "exchange_mode"
 CONF_REGISTRY_ENABLED = "registry_enabled"
 CONF_REGISTRY_DELIVERED_DAYS = "registry_delivered_days"
 CONF_REGISTRY_DETECTED_DAYS = "registry_detected_days"
+CONF_FORWARD_TO_SEVENTEENTRACK = "forward_to_seventeentrack"
+CONF_SEVENTEENTRACK_CONFIG_ENTRY = "seventeentrack_config_entry"
 
 # Defaults
 DEFAULT_CAMERA_NAME = "Mail USPS Camera"
@@ -156,6 +158,7 @@ DEFAULT_EXCHANGE_MODE = False
 DEFAULT_REGISTRY_ENABLED = False
 DEFAULT_REGISTRY_DELIVERED_DAYS = 3
 DEFAULT_REGISTRY_DETECTED_DAYS = 14
+DEFAULT_FORWARD_TO_SEVENTEENTRACK = False
 REGISTRY_SENSOR_KEYS: Final[tuple[str, ...]] = (
     "registry_tracked",
     "registry_in_transit",
