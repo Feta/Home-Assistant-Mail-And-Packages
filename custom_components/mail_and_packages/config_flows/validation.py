@@ -225,6 +225,12 @@ async def _validate_forwarded_emails(user_input: dict, errors: dict) -> None:
         errors[CONF_FORWARDED_EMAILS] = status[0]
 
 
+def _normalize_registry_option(user_input: dict) -> None:
+    """Persist the registry option only when explicitly enabled."""
+    if not user_input.get(CONF_REGISTRY_ENABLED, False):
+        user_input.pop(CONF_REGISTRY_ENABLED, None)
+
+
 async def _validate_user_input(
     user_input: dict, hass: HomeAssistant | None = None
 ) -> tuple:
@@ -236,10 +242,7 @@ async def _validate_user_input(
 
     errors = {}
 
-    # Keep disabled registry behavior backward-compatible with existing entries.
-    # The key is only persisted when the feature is explicitly enabled.
-    if not user_input.get(CONF_REGISTRY_ENABLED, False):
-        user_input.pop(CONF_REGISTRY_ENABLED, None)
+    _normalize_registry_option(user_input)
 
     await _validate_amazon_fwds(user_input, errors)
 
