@@ -41,6 +41,7 @@ from custom_components.mail_and_packages.const import (
     CONF_IMAP_SECURITY,
     CONF_IMAP_TIMEOUT,
     CONF_POST_DE_CUSTOM_IMG,
+    CONF_REGISTRY_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_UPS_CUSTOM_IMG,
     CONF_USPS_PLACEHOLDER,
@@ -48,6 +49,7 @@ from custom_components.mail_and_packages.const import (
     CONF_WALMART_CUSTOM_IMG,
     DEFAULT_CUSTOM_DAYS,
     DEFAULT_EXCHANGE_MODE,
+    DEFAULT_REGISTRY_ENABLED,
     DEFAULT_USPS_PLACEHOLDER,
     DEFAULT_VERIFY_SSL,
 )
@@ -261,6 +263,7 @@ def _build_step_2_schema(
                 for key, default_val in [
                     (CONF_ALLOW_FORWARDED_EMAILS, False),
                     (CONF_EXCHANGE_MODE, DEFAULT_EXCHANGE_MODE),
+                    (CONF_REGISTRY_ENABLED, DEFAULT_REGISTRY_ENABLED),
                     (CONF_GENERATE_GRID, False),
                     (CONF_GENERATE_MP4, False),
                     (CONF_USPS_PLACEHOLDER, DEFAULT_USPS_PLACEHOLDER),
