@@ -28,12 +28,19 @@ from custom_components.mail_and_packages.const import (
     CONF_AUTH_TYPE,
     CONF_CUSTOM_DAYS,
     CONF_IMAP_TIMEOUT,
+    CONF_REGISTRY_DELIVERED_DAYS,
+    CONF_REGISTRY_DETECTED_DAYS,
+    CONF_REGISTRY_ENABLED,
     DEFAULT_CUSTOM_DAYS,
     DEFAULT_IMAP_TIMEOUT,
+    DEFAULT_REGISTRY_DELIVERED_DAYS,
+    DEFAULT_REGISTRY_DETECTED_DAYS,
+    DEFAULT_REGISTRY_ENABLED,
     MAX_TRACKING_AGE_DAYS,
 )
 from custom_components.mail_and_packages.helpers import copy_images
 from custom_components.mail_and_packages.shippers import get_shipper_for_sensor
+from custom_components.mail_and_packages.tracking import PackageRegistry
 from custom_components.mail_and_packages.utils.cache import EmailCache
 from custom_components.mail_and_packages.utils.image import (
     default_image_path,
@@ -127,6 +134,12 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         self._in_transit_tracking: dict[str, dict[str, str]] = {}
         self._mail_delivered_latch_state = MailDeliveredLatchState()
         self.email_cache = EmailCache(hass=hass)
+        self.registry = (
+            PackageRegistry(hass, config_entry.entry_id)
+            if config_entry
+            and config.get(CONF_REGISTRY_ENABLED, DEFAULT_REGISTRY_ENABLED)
+            else None
+        )
 
         _LOGGER.debug("Data will be update every %s", self.interval)
 
@@ -249,6 +262,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             self._dedupe_marketplace_duplicates(data, tracking_details)
             self._apply_tracking_state(data, tracking_details, today_iso)
             self._latch_mail_delivered(data, today_iso)
+            await self._update_package_registry(data, tracking_details)
 
             # Aggregate global transit and delivered sensors
             self._aggregate_package_counts(data)
@@ -264,6 +278,36 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Problem creating: %s", err)
 
         return data
+
+    async def _update_package_registry(
+        self,
+        data: dict,
+        tracking_details: dict[str, list[str]],
+    ) -> None:
+        """Reconcile carrier tracking details into the persistent registry."""
+        if self.registry is None:
+            return
+
+        await self.registry.async_load()
+        transitions = self.registry.reconcile_tracking_details(tracking_details)
+        expired = self.registry.auto_expire(
+            delivered_days=self.config.get(
+                CONF_REGISTRY_DELIVERED_DAYS,
+                DEFAULT_REGISTRY_DELIVERED_DAYS,
+            ),
+            detected_days=self.config.get(
+                CONF_REGISTRY_DETECTED_DAYS,
+                DEFAULT_REGISTRY_DETECTED_DAYS,
+            ),
+        )
+        data.update(self.registry.coordinator_data())
+
+        if transitions or expired:
+            await self.registry.async_save()
+
+        for transition in transitions:
+            event_type = f"{const.DOMAIN}_package_{transition['status']}"
+            self.hass.bus.async_fire(event_type, transition)
 
     def _initialize_data(self) -> dict:
         """Initialize core data structure with default values."""
