@@ -182,14 +182,26 @@ class PackageRegistry:
             description="Manually added",
         )
 
-    def is_forwarded(self, tracking_number: str, provider: str) -> bool:
-        """Return whether a package was already forwarded to a provider."""
+    def is_forwarded(
+        self,
+        tracking_number: str,
+        provider: str,
+        config_entry_id: str | None = None,
+    ) -> bool:
+        """Return whether a package was forwarded to a provider account."""
         tracking = self.normalize_tracking_number(tracking_number)
         package = self._packages.get(tracking)
         if not package:
             return False
         forwarded_to = package.get("forwarded_to", {})
-        return isinstance(forwarded_to, dict) and provider in forwarded_to
+        if not isinstance(forwarded_to, dict):
+            return False
+        provider_state = forwarded_to.get(provider)
+        if not isinstance(provider_state, dict):
+            return False
+        if config_entry_id is None:
+            return True
+        return provider_state.get("config_entry_id") == config_entry_id
 
     def mark_forwarded(
         self,
@@ -206,7 +218,11 @@ class PackageRegistry:
             return False
 
         forwarded_to = package.setdefault("forwarded_to", {})
-        if provider in forwarded_to:
+        provider_state = forwarded_to.get(provider)
+        if (
+            isinstance(provider_state, dict)
+            and provider_state.get("config_entry_id") == config_entry_id
+        ):
             return False
 
         forwarded_to[provider] = {
@@ -219,8 +235,9 @@ class PackageRegistry:
     def get_forward_candidates(
         self,
         provider: str,
+        config_entry_id: str | None = None,
     ) -> list[tuple[str, dict[str, Any]]]:
-        """Return active packages that have not been sent to a provider."""
+        """Return active packages not yet sent to a provider account."""
         candidates: list[tuple[str, dict[str, Any]]] = []
         for tracking, package in self._packages.items():
             if package.get("status") not in (
@@ -229,7 +246,7 @@ class PackageRegistry:
                 "out_for_delivery",
             ):
                 continue
-            if self.is_forwarded(tracking, provider):
+            if self.is_forwarded(tracking, provider, config_entry_id):
                 continue
             candidates.append((tracking, package))
         return candidates
