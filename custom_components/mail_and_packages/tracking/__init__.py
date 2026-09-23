@@ -1,5 +1,5 @@
 """Package tracking helpers."""
 
-from .registry import PackageRegistry, STATUS_RANK
+from .registry import STATUS_RANK, PackageRegistry
 
-__all__ = ["PackageRegistry", "STATUS_RANK"]
+__all__ = ["STATUS_RANK", "PackageRegistry"]
