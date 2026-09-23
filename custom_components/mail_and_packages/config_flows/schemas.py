@@ -237,26 +237,26 @@ def _build_step_2_schema(
         vol.Required(CONF_FOLDER, default=default_folder): multi_folder_select(
             {m: m for m in mailboxes}
         ),
-            vol.Required(
-                CONF_RESOURCES,
-                default=get_default(CONF_RESOURCES),
-            ): cv.multi_select(get_resources()),
-            vol.Optional(
-                CONF_SCAN_INTERVAL,
-                default=get_default(CONF_SCAN_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=5)),
-            vol.Optional(
-                CONF_CUSTOM_DAYS,
-                default=get_default(CONF_CUSTOM_DAYS, DEFAULT_CUSTOM_DAYS),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-            vol.Optional(
-                CONF_IMAP_TIMEOUT,
-                default=get_default(CONF_IMAP_TIMEOUT),
-            ): vol.All(vol.Coerce(int), vol.Range(min=10)),
-            vol.Optional(
-                CONF_DURATION,
-                default=get_default(CONF_DURATION),
-            ): vol.Coerce(int),
+        vol.Required(
+            CONF_RESOURCES,
+            default=get_default(CONF_RESOURCES),
+        ): cv.multi_select(get_resources()),
+        vol.Optional(
+            CONF_SCAN_INTERVAL,
+            default=get_default(CONF_SCAN_INTERVAL),
+        ): vol.All(vol.Coerce(int), vol.Range(min=5)),
+        vol.Optional(
+            CONF_CUSTOM_DAYS,
+            default=get_default(CONF_CUSTOM_DAYS, DEFAULT_CUSTOM_DAYS),
+        ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional(
+            CONF_IMAP_TIMEOUT,
+            default=get_default(CONF_IMAP_TIMEOUT),
+        ): vol.All(vol.Coerce(int), vol.Range(min=10)),
+        vol.Optional(
+            CONF_DURATION,
+            default=get_default(CONF_DURATION),
+        ): vol.Coerce(int),
         **{
             vol.Optional(
                 key,
@@ -294,9 +294,7 @@ def _build_step_2_schema(
         if configured_entry
         else vol.Optional(CONF_SEVENTEENTRACK_CONFIG_ENTRY)
     )
-    schema[entry_key] = selector.ConfigEntrySelector(
-        {"integration": "seventeentrack"}
-    )
+    schema[entry_key] = selector.ConfigEntrySelector({"integration": "seventeentrack"})
 
     return vol.Schema(schema)
 
