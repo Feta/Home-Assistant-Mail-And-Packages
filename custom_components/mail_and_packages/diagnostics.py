@@ -38,7 +38,7 @@ async def async_get_device_diagnostics(
     dynamic_keys = {
         variable
         for variable in coordinator.data
-        if "tracking" in variable or "order" in variable
+        if "tracking" in variable or "order" in variable or "registry" in variable
     }
     redact_keys = REDACT_KEYS | dynamic_keys
 
