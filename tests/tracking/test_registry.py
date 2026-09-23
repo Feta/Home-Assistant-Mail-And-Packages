@@ -1,6 +1,6 @@
 """Tests for the persistent package registry."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,6 +33,7 @@ def registry(mock_store):
 
 @pytest.mark.asyncio
 async def test_load_is_idempotent(registry, mock_store):
+    """Load should hit persistent storage only once."""
     await registry.async_load()
     await registry.async_load()
     mock_store.async_load.assert_awaited_once()
@@ -40,6 +41,7 @@ async def test_load_is_idempotent(registry, mock_store):
 
 @pytest.mark.asyncio
 async def test_register_normalizes_and_advances(registry):
+    """Registry should normalize keys and only move state forward."""
     await registry.async_load()
     assert registry.register_package(" 1zabc ", "UPS", "detected")
     assert "1ZABC" in registry.packages
@@ -51,6 +53,7 @@ async def test_register_normalizes_and_advances(registry):
 
 @pytest.mark.asyncio
 async def test_carrier_confirmation_without_status_change(registry):
+    """Carrier mail should confirm an existing package without advancing state."""
     await registry.async_load()
     registry.register_package("PKG1", "ups", "in_transit", source="universal_scan")
     assert registry.register_package(
@@ -61,6 +64,7 @@ async def test_carrier_confirmation_without_status_change(registry):
 
 @pytest.mark.asyncio
 async def test_cleared_package_not_redetected(registry):
+    """Cleared packages should stay suppressed until manually re-added."""
     await registry.async_load()
     registry.register_package("PKG1", "ups", "delivered")
     assert registry.clear_package("pkg1")
@@ -71,6 +75,7 @@ async def test_cleared_package_not_redetected(registry):
 
 @pytest.mark.asyncio
 async def test_reconcile_tracking_details(registry):
+    """Carrier parser output should populate and advance registry records."""
     await registry.async_load()
     transitions = registry.reconcile_tracking_details(
         {
@@ -85,6 +90,7 @@ async def test_reconcile_tracking_details(registry):
 
 @pytest.mark.asyncio
 async def test_reconcile_does_not_downgrade_delivered(registry):
+    """Later scans should never downgrade a delivered package."""
     await registry.async_load()
     registry.reconcile_tracking_details({"ups_delivered": ["1Z123"]})
     registry.reconcile_tracking_details({"ups_delivering": ["1Z123"]})
@@ -93,6 +99,7 @@ async def test_reconcile_does_not_downgrade_delivered(registry):
 
 @pytest.mark.asyncio
 async def test_counts_and_coordinator_data(registry):
+    """Registry should expose dashboard-friendly summary data."""
     await registry.async_load()
     registry.register_package("A", "ups", "detected")
     registry.register_package("B", "fedex", "in_transit")
@@ -106,6 +113,7 @@ async def test_counts_and_coordinator_data(registry):
 
 @pytest.mark.asyncio
 async def test_auto_expire(registry):
+    """Expired delivered, detected, and cleared records should be removed."""
     await registry.async_load()
     registry.register_package("DELIVERED", "ups", "delivered")
     registry.register_package("DETECTED", "ups", "detected")
@@ -113,13 +121,13 @@ async def test_auto_expire(registry):
     registry.clear_package("CLEARED")
 
     registry.packages["DELIVERED"]["last_updated"] = (
-        datetime.now(timezone.utc) - timedelta(days=4)
+        datetime.now(UTC) - timedelta(days=4)
     ).isoformat()
     registry.packages["DETECTED"]["last_updated"] = (
-        datetime.now(timezone.utc) - timedelta(days=15)
+        datetime.now(UTC) - timedelta(days=15)
     ).isoformat()
     registry.packages["CLEARED"]["last_updated"] = (
-        datetime.now(timezone.utc) - timedelta(days=31)
+        datetime.now(UTC) - timedelta(days=31)
     ).isoformat()
 
     assert registry.auto_expire() == 3
@@ -128,6 +136,7 @@ async def test_auto_expire(registry):
 
 @pytest.mark.asyncio
 async def test_manual_mark_and_clear(registry):
+    """Manual lifecycle actions should update package state."""
     await registry.async_load()
     registry.add_package("1ZMANUAL", "ups")
     assert registry.mark_delivered("1zmanual")
@@ -138,6 +147,7 @@ async def test_manual_mark_and_clear(registry):
 
 @pytest.mark.asyncio
 async def test_save_and_remove(registry, mock_store):
+    """Registry should persist and remove its storage cleanly."""
     await registry.async_load()
     registry.add_package("1Z123", "ups")
     await registry.async_save()
@@ -148,6 +158,7 @@ async def test_save_and_remove(registry, mock_store):
 
 
 def test_status_rank_ordering():
+    """Lifecycle status ranks should remain strictly ordered."""
     assert STATUS_RANK["detected"] < STATUS_RANK["in_transit"]
     assert STATUS_RANK["in_transit"] < STATUS_RANK["out_for_delivery"]
     assert STATUS_RANK["out_for_delivery"] < STATUS_RANK["delivered"]
