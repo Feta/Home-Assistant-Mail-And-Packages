@@ -219,10 +219,6 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                         return self._data
                     raise UpdateFailed(error) from error
 
-                if data:
-                    self._data = data
-                    await self._binary_sensor_update(data)
-                return self._data
         except TimeoutError:
             _LOGGER.error(
                 "Mail and Packages scan exceeded its %.0fs time budget (elapsed %.1fs). "
@@ -237,6 +233,12 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             if self._data:
                 return self._data
             raise UpdateFailed("Scan timed out and no prior data available") from None
+
+        if data:
+            await self._async_forward_registry_packages(data)
+            self._data = data
+            await self._binary_sensor_update(data)
+        return self._data
 
     async def process_emails(self, hass: HomeAssistant, config: dict) -> dict:
         """Process emails and update sensors."""
@@ -306,39 +308,54 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 DEFAULT_REGISTRY_DETECTED_DAYS,
             ),
         )
-        forwarding_changes = 0
-        if self.config.get(
-            CONF_FORWARD_TO_SEVENTEENTRACK,
-            DEFAULT_FORWARD_TO_SEVENTEENTRACK,
-        ):
-            forwarding_result = await async_forward_pending_to_seventeentrack(
-                self.hass,
-                self.registry,
-                self.config.get(CONF_SEVENTEENTRACK_CONFIG_ENTRY),
-            )
-            forwarding_changes = (
-                forwarding_result.forwarded + forwarding_result.existing_remote
-            )
-            if not forwarding_result.service_available:
-                _LOGGER.debug(
-                    "17TRACK forwarding is enabled but no usable 17TRACK service "
-                    "and config entry are currently available"
-                )
-            elif forwarding_result.failed:
-                _LOGGER.warning(
-                    "17TRACK forwarding completed with %s failed package(s); "
-                    "they will be retried",
-                    forwarding_result.failed,
-                )
-
         data.update(self.registry.coordinator_data())
 
-        if transitions or expired or forwarding_changes:
+        if transitions or expired:
             await self.registry.async_save()
 
         for transition in transitions:
             event_type = f"{const.DOMAIN}_package_{transition['status']}"
             self.hass.bus.async_fire(event_type, transition)
+
+    async def _async_forward_registry_packages(self, data: dict) -> None:
+        """Forward packages without coupling provider latency to the IMAP scan."""
+        if self.registry is None or not self.config.get(
+            CONF_FORWARD_TO_SEVENTEENTRACK,
+            DEFAULT_FORWARD_TO_SEVENTEENTRACK,
+        ):
+            return
+
+        try:
+            async with asyncio.timeout(30):
+                forwarding_result = await async_forward_pending_to_seventeentrack(
+                    self.hass,
+                    self.registry,
+                    self.config.get(CONF_SEVENTEENTRACK_CONFIG_ENTRY),
+                )
+        except TimeoutError:
+            _LOGGER.warning(
+                "17TRACK forwarding timed out; package handoff will be retried later"
+            )
+            return
+
+        forwarding_changes = (
+            forwarding_result.forwarded + forwarding_result.existing_remote
+        )
+        if forwarding_changes:
+            data.update(self.registry.coordinator_data())
+            await self.registry.async_save()
+
+        if not forwarding_result.service_available:
+            _LOGGER.debug(
+                "17TRACK forwarding is enabled but no usable 17TRACK service "
+                "and config entry are currently available"
+            )
+        elif forwarding_result.failed:
+            _LOGGER.warning(
+                "17TRACK forwarding completed with %s failed package(s); "
+                "they will be retried",
+                forwarding_result.failed,
+            )
 
     def _initialize_data(self) -> dict:
         """Initialize core data structure with default values."""
