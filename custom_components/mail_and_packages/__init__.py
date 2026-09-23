@@ -3,13 +3,14 @@
 import asyncio
 import logging
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_ACCESS_TOKEN,
     CONF_RESOURCES,
     CONF_TOKEN,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import (
     config_validation as cv,
 )
@@ -66,6 +67,7 @@ from .coordinator import (
     MailDataUpdateCoordinator,
 )
 from .migrate import async_migrate_entry
+from .tracking import PackageRegistry
 from .utils.image import default_image_path, hash_file
 
 __all__ = [
@@ -134,8 +136,114 @@ OAUTH_TOKEN_KEYS = {
 
 
 async def async_setup(hass: HomeAssistant, config_entry: MailAndPackagesConfigEntry):  # pylint: disable=unused-argument
-    """Disallow configuration via YAML."""
+    """Set up integration-level services."""
+    _register_registry_services(hass)
     return True
+
+
+def _registry_coordinators(hass: HomeAssistant):
+    """Yield coordinators that currently have the package registry enabled."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        runtime_data = getattr(entry, "runtime_data", None)
+        coordinator = getattr(runtime_data, "coordinator", None)
+        if coordinator is not None and coordinator.registry is not None:
+            yield coordinator
+
+
+async def _async_publish_registry(coordinator) -> None:
+    """Persist and publish registry state without forcing an IMAP refresh."""
+    await coordinator.registry.async_save()
+    data = dict(coordinator.data or {})
+    data.update(coordinator.registry.coordinator_data())
+    coordinator.async_set_updated_data(data)
+
+
+def _register_registry_services(hass: HomeAssistant) -> None:
+    """Register package-registry management services once."""
+    if hass.services.has_service(DOMAIN, "clear_package"):
+        return
+
+    async def handle_clear_package(call: ServiceCall) -> None:
+        tracking = call.data["tracking_number"]
+        for coordinator in _registry_coordinators(hass):
+            if coordinator.registry.clear_package(tracking):
+                await _async_publish_registry(coordinator)
+
+    async def handle_clear_all_delivered(call: ServiceCall) -> None:  # pylint: disable=unused-argument
+        for coordinator in _registry_coordinators(hass):
+            if coordinator.registry.clear_all_delivered():
+                await _async_publish_registry(coordinator)
+
+    async def handle_mark_delivered(call: ServiceCall) -> None:
+        tracking = call.data["tracking_number"]
+        for coordinator in _registry_coordinators(hass):
+            registry = coordinator.registry
+            normalized = registry.normalize_tracking_number(tracking)
+            package = registry.packages.get(normalized)
+            previous_status = package.get("status") if package else None
+            if registry.mark_delivered(normalized):
+                await _async_publish_registry(coordinator)
+                hass.bus.async_fire(
+                    f"{DOMAIN}_package_delivered",
+                    {
+                        "tracking_number": normalized,
+                        "carrier": (package or {}).get("carrier", "unknown"),
+                        "status": "delivered",
+                        "previous_status": previous_status,
+                        "source": "manual",
+                    },
+                )
+
+    async def handle_add_package(call: ServiceCall) -> None:
+        tracking = call.data["tracking_number"]
+        carrier = call.data.get("carrier", "unknown")
+        for coordinator in _registry_coordinators(hass):
+            registry = coordinator.registry
+            normalized = registry.normalize_tracking_number(tracking)
+            if registry.add_package(normalized, carrier):
+                await _async_publish_registry(coordinator)
+                hass.bus.async_fire(
+                    f"{DOMAIN}_package_detected",
+                    {
+                        "tracking_number": normalized,
+                        "carrier": carrier.lower(),
+                        "status": "detected",
+                        "previous_status": None,
+                        "source": "manual",
+                    },
+                )
+
+    tracking_schema = vol.Schema({vol.Required("tracking_number"): cv.string})
+    add_schema = vol.Schema(
+        {
+            vol.Required("tracking_number"): cv.string,
+            vol.Optional("carrier", default="unknown"): cv.string,
+        }
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "clear_package",
+        handle_clear_package,
+        schema=tracking_schema,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "clear_all_delivered",
+        handle_clear_all_delivered,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "mark_delivered",
+        handle_mark_delivered,
+        schema=tracking_schema,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "add_package",
+        handle_add_package,
+        schema=add_schema,
+    )
 
 
 async def async_setup_entry(
@@ -207,6 +315,15 @@ async def update_listener(
 
     _LOGGER.debug("Attempting to reload sensors from the %s integration", DOMAIN)
     await hass.config_entries.async_reload(config_entry.entry_id)
+
+
+async def async_remove_entry(
+    hass: HomeAssistant,
+    config_entry: MailAndPackagesConfigEntry,
+) -> None:
+    """Remove package-registry storage when a config entry is deleted."""
+    registry = PackageRegistry(hass, config_entry.entry_id)
+    await registry.async_remove()
 
 
 async def async_remove_config_entry_device(  # pylint: disable-next=unused-argument
