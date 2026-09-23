@@ -172,7 +172,7 @@ async def _handle_clear_package(
 
 async def _handle_clear_all_delivered(
     hass: HomeAssistant,
-    call: ServiceCall,  # noqa: ARG001
+    call: ServiceCall,
 ) -> None:
     """Handle clearing all delivered packages."""
     for coordinator in _registry_coordinators(hass):
