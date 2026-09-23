@@ -146,6 +146,39 @@ async def test_manual_mark_and_clear(registry):
 
 
 @pytest.mark.asyncio
+async def test_forwarding_state_is_account_scoped(registry):
+    """Forwarding state should be persisted per provider account."""
+    await registry.async_load()
+    registry.register_package("1ZFORWARD", "ups", "in_transit")
+
+    assert registry.mark_forwarded(
+        "1ZFORWARD",
+        "seventeentrack",
+        "entry-a",
+    )
+    assert registry.is_forwarded(
+        "1ZFORWARD",
+        "seventeentrack",
+        "entry-a",
+    )
+    assert not registry.is_forwarded(
+        "1ZFORWARD",
+        "seventeentrack",
+        "entry-b",
+    )
+    assert registry.mark_forwarded(
+        "1ZFORWARD",
+        "seventeentrack",
+        "entry-b",
+    )
+    assert registry.is_forwarded(
+        "1ZFORWARD",
+        "seventeentrack",
+        "entry-b",
+    )
+
+
+@pytest.mark.asyncio
 async def test_save_and_remove(registry, mock_store):
     """Registry should persist and remove its storage cleanly."""
     await registry.async_load()
