@@ -22,6 +22,7 @@ from .const import (
     ATTR_TRACKING,
     BINARY_SENSORS,
     CONF_PATH,
+    REGISTRY_SENSOR_KEYS,
     SENSOR_TYPES,
 )
 from .shippers import SHIPPER_REGISTRY
@@ -106,8 +107,10 @@ async def get_items(
 
 
 def get_resources(hass: HomeAssistant | None = None) -> dict:
-    """Return resources from const."""
-    resources = {k: v.name for k, v in SENSOR_TYPES.items()}
+    """Return selectable resources from const."""
+    resources = {
+        k: v.name for k, v in SENSOR_TYPES.items() if k not in REGISTRY_SENSOR_KEYS
+    }
     resources.update({k: v.name for k, v in BINARY_SENSORS.items() if v.selectable})
     return resources
 
