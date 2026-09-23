@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from functools import partial
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -158,60 +159,80 @@ async def _async_publish_registry(coordinator) -> None:
     coordinator.async_set_updated_data(data)
 
 
+async def _handle_clear_package(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> None:
+    """Handle clearing one package from all enabled registries."""
+    tracking = call.data["tracking_number"]
+    for coordinator in _registry_coordinators(hass):
+        if coordinator.registry.clear_package(tracking):
+            await _async_publish_registry(coordinator)
+
+
+async def _handle_clear_all_delivered(
+    hass: HomeAssistant,
+    call: ServiceCall,  # noqa: ARG001
+) -> None:
+    """Handle clearing all delivered packages."""
+    for coordinator in _registry_coordinators(hass):
+        if coordinator.registry.clear_all_delivered():
+            await _async_publish_registry(coordinator)
+
+
+async def _handle_mark_delivered(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> None:
+    """Handle manually marking one package delivered."""
+    tracking = call.data["tracking_number"]
+    for coordinator in _registry_coordinators(hass):
+        registry = coordinator.registry
+        normalized = registry.normalize_tracking_number(tracking)
+        package = registry.packages.get(normalized)
+        previous_status = package.get("status") if package else None
+        if registry.mark_delivered(normalized):
+            await _async_publish_registry(coordinator)
+            hass.bus.async_fire(
+                f"{DOMAIN}_package_delivered",
+                {
+                    "tracking_number": normalized,
+                    "carrier": (package or {}).get("carrier", "unknown"),
+                    "status": "delivered",
+                    "previous_status": previous_status,
+                    "source": "manual",
+                },
+            )
+
+
+async def _handle_add_package(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> None:
+    """Handle manually adding one package."""
+    tracking = call.data["tracking_number"]
+    carrier = call.data.get("carrier", "unknown")
+    for coordinator in _registry_coordinators(hass):
+        registry = coordinator.registry
+        normalized = registry.normalize_tracking_number(tracking)
+        if registry.add_package(normalized, carrier):
+            await _async_publish_registry(coordinator)
+            hass.bus.async_fire(
+                f"{DOMAIN}_package_detected",
+                {
+                    "tracking_number": normalized,
+                    "carrier": carrier.lower(),
+                    "status": "detected",
+                    "previous_status": None,
+                    "source": "manual",
+                },
+            )
+
+
 def _register_registry_services(hass: HomeAssistant) -> None:
     """Register package-registry management services once."""
     if hass.services.has_service(DOMAIN, "clear_package"):
         return
-
-    async def handle_clear_package(call: ServiceCall) -> None:
-        tracking = call.data["tracking_number"]
-        for coordinator in _registry_coordinators(hass):
-            if coordinator.registry.clear_package(tracking):
-                await _async_publish_registry(coordinator)
-
-    async def handle_clear_all_delivered(call: ServiceCall) -> None:  # pylint: disable=unused-argument
-        for coordinator in _registry_coordinators(hass):
-            if coordinator.registry.clear_all_delivered():
-                await _async_publish_registry(coordinator)
-
-    async def handle_mark_delivered(call: ServiceCall) -> None:
-        tracking = call.data["tracking_number"]
-        for coordinator in _registry_coordinators(hass):
-            registry = coordinator.registry
-            normalized = registry.normalize_tracking_number(tracking)
-            package = registry.packages.get(normalized)
-            previous_status = package.get("status") if package else None
-            if registry.mark_delivered(normalized):
-                await _async_publish_registry(coordinator)
-                hass.bus.async_fire(
-                    f"{DOMAIN}_package_delivered",
-                    {
-                        "tracking_number": normalized,
-                        "carrier": (package or {}).get("carrier", "unknown"),
-                        "status": "delivered",
-                        "previous_status": previous_status,
-                        "source": "manual",
-                    },
-                )
-
-    async def handle_add_package(call: ServiceCall) -> None:
-        tracking = call.data["tracking_number"]
-        carrier = call.data.get("carrier", "unknown")
-        for coordinator in _registry_coordinators(hass):
-            registry = coordinator.registry
-            normalized = registry.normalize_tracking_number(tracking)
-            if registry.add_package(normalized, carrier):
-                await _async_publish_registry(coordinator)
-                hass.bus.async_fire(
-                    f"{DOMAIN}_package_detected",
-                    {
-                        "tracking_number": normalized,
-                        "carrier": carrier.lower(),
-                        "status": "detected",
-                        "previous_status": None,
-                        "source": "manual",
-                    },
-                )
 
     tracking_schema = vol.Schema({vol.Required("tracking_number"): cv.string})
     add_schema = vol.Schema(
@@ -224,24 +245,24 @@ def _register_registry_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "clear_package",
-        handle_clear_package,
+        partial(_handle_clear_package, hass),
         schema=tracking_schema,
     )
     hass.services.async_register(
         DOMAIN,
         "clear_all_delivered",
-        handle_clear_all_delivered,
+        partial(_handle_clear_all_delivered, hass),
     )
     hass.services.async_register(
         DOMAIN,
         "mark_delivered",
-        handle_mark_delivered,
+        partial(_handle_mark_delivered, hass),
         schema=tracking_schema,
     )
     hass.services.async_register(
         DOMAIN,
         "add_package",
-        handle_add_package,
+        partial(_handle_add_package, hass),
         schema=add_schema,
     )
 
