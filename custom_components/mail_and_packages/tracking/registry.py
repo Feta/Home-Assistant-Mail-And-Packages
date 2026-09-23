@@ -115,6 +115,7 @@ class PackageRegistry:
             "first_seen": now,
             "last_updated": now,
             "carrier_confirmed": source == "carrier_email",
+            "forwarded_to": {},
         }
         return True
 
@@ -169,6 +170,7 @@ class PackageRegistry:
                     "description": "Manually added",
                     "last_updated": datetime.now(UTC).isoformat(),
                     "carrier_confirmed": False,
+                    "forwarded_to": {},
                 }
             )
             return True
@@ -179,6 +181,58 @@ class PackageRegistry:
             source="manual",
             description="Manually added",
         )
+
+    def is_forwarded(self, tracking_number: str, provider: str) -> bool:
+        """Return whether a package was already forwarded to a provider."""
+        tracking = self.normalize_tracking_number(tracking_number)
+        package = self._packages.get(tracking)
+        if not package:
+            return False
+        forwarded_to = package.get("forwarded_to", {})
+        return isinstance(forwarded_to, dict) and provider in forwarded_to
+
+    def mark_forwarded(
+        self,
+        tracking_number: str,
+        provider: str,
+        config_entry_id: str,
+        *,
+        existing_remote: bool = False,
+    ) -> bool:
+        """Persist a successful tracking-provider handoff."""
+        tracking = self.normalize_tracking_number(tracking_number)
+        package = self._packages.get(tracking)
+        if not package or package.get("status") in ("delivered", "cleared"):
+            return False
+
+        forwarded_to = package.setdefault("forwarded_to", {})
+        if provider in forwarded_to:
+            return False
+
+        forwarded_to[provider] = {
+            "forwarded_at": datetime.now(UTC).isoformat(),
+            "config_entry_id": config_entry_id,
+            "existing_remote": existing_remote,
+        }
+        return True
+
+    def get_forward_candidates(
+        self,
+        provider: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Return active packages that have not been sent to a provider."""
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        for tracking, package in self._packages.items():
+            if package.get("status") not in (
+                "detected",
+                "in_transit",
+                "out_for_delivery",
+            ):
+                continue
+            if self.is_forwarded(tracking, provider):
+                continue
+            candidates.append((tracking, package))
+        return candidates
 
     def set_exception(self, tracking_number: str, value: bool = True) -> bool:
         """Set or clear the exception flag for an active package."""
@@ -302,6 +356,11 @@ class PackageRegistry:
                     "first_seen": package.get("first_seen", ""),
                     "last_updated": package.get("last_updated", ""),
                     "carrier_confirmed": package.get("carrier_confirmed", False),
+                    "forwarded_to": sorted(
+                        package.get("forwarded_to", {}).keys()
+                        if isinstance(package.get("forwarded_to"), dict)
+                        else []
+                    ),
                 }
             )
         return result
