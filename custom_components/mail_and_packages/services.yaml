@@ -11,3 +11,47 @@ update_image:
         entity:
           domain: camera
           integration: mail_and_packages
+
+clear_package:
+  name: Clear Package
+  description: Hide a tracked package from the persistent package registry.
+  fields:
+    tracking_number:
+      name: Tracking Number
+      description: Tracking number to clear.
+      required: true
+      selector:
+        text:
+
+clear_all_delivered:
+  name: Clear All Delivered
+  description: Clear all delivered packages from the persistent package registry.
+
+mark_delivered:
+  name: Mark Package Delivered
+  description: Manually mark a tracked package as delivered.
+  fields:
+    tracking_number:
+      name: Tracking Number
+      description: Tracking number to mark delivered.
+      required: true
+      selector:
+        text:
+
+add_package:
+  name: Add Package
+  description: Manually add a tracking number to the persistent package registry.
+  fields:
+    tracking_number:
+      name: Tracking Number
+      description: Tracking number to add.
+      required: true
+      selector:
+        text:
+    carrier:
+      name: Carrier
+      description: Optional carrier name such as ups, fedex, or usps.
+      required: false
+      default: unknown
+      selector:
+        text:
