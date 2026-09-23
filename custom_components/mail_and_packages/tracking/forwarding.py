@@ -164,7 +164,7 @@ async def async_forward_pending_to_seventeentrack(
             )
         except Exception as err:  # noqa: BLE001
             failed += 1
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "17TRACK rejected or failed to add one package (%s); "
                 "it will be retried on a later scan",
                 type(err).__name__,
