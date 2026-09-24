@@ -1,7 +1,6 @@
 {
-    "name": "Mail and Packages",
-    "homeassistant": "2025.5.0",
-    "zip_release": true,
-    "filename": "mail_and_packages.zip",
-    "render_readme": true
+  "name": "Mail and Packages Super Tracking (Beta)",
+  "homeassistant": "2025.5.0",
+  "zip_release": false,
+  "render_readme": true
 }
