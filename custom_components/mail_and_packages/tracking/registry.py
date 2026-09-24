@@ -475,14 +475,22 @@ class PackageRegistry:
                 for key, value in metadata.items()
                 if key in allowed and value not in (None, "")
             }
-            incoming.update(
-                {
-                    "merchant": "Amazon",
-                    "order_id": str(order_id),
-                }
-            )
-
             existing = self._merchant_orders.get(str(order_id))
+            preserved = (
+                {
+                    key: value
+                    for key, value in existing.items()
+                    if key in allowed and value not in (None, "")
+                }
+                if isinstance(existing, dict)
+                else {}
+            )
+            merged = {
+                **preserved,
+                **incoming,
+                "merchant": "Amazon",
+                "order_id": str(order_id),
+            }
             comparable_existing = (
                 {
                     key: value
@@ -492,14 +500,14 @@ class PackageRegistry:
                 if isinstance(existing, dict)
                 else {}
             )
-            if comparable_existing == incoming:
+            if comparable_existing == merged:
                 continue
 
             first_seen = (
                 existing.get("first_seen", now) if isinstance(existing, dict) else now
             )
             self._merchant_orders[str(order_id)] = {
-                **incoming,
+                **merged,
                 "first_seen": first_seen,
                 "last_updated": now,
             }
@@ -527,10 +535,15 @@ class PackageRegistry:
         if not clean:
             return False
 
-        if package.get("merchant") == clean:
+        existing = package.get("merchant")
+        merged = {
+            **(existing if isinstance(existing, dict) else {}),
+            **clean,
+        }
+        if existing == merged:
             return False
 
-        package["merchant"] = clean
+        package["merchant"] = merged
         package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
