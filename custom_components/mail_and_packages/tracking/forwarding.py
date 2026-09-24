@@ -114,9 +114,7 @@ async def async_get_seventeentrack_snapshot(
     if not isinstance(packages, list):
         packages = []
 
-    valid_packages = tuple(
-        package for package in packages if isinstance(package, dict)
-    )
+    valid_packages = tuple(package for package in packages if isinstance(package, dict))
     return ProviderSnapshot(
         config_entry_id=config_entry_id,
         packages=valid_packages,
