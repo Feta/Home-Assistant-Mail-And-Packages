@@ -18,6 +18,7 @@ from typing import Any
 
 from aioimaplib import IMAP4_SSL
 
+from custom_components.mail_and_packages.utils.amazon import extract_amazon_order_details
 from custom_components.mail_and_packages.utils.cache import EmailCache
 from custom_components.mail_and_packages.utils.imap import _execute_single_search
 
@@ -27,7 +28,8 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
-SCANNER_UID_VERSION = 1
+SCANNER_UID_VERSION = 2
+AMAZON_ORDER_PATTERN = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 
 TRACKING_CONTEXT_KEYWORDS = (
     "tracking",
@@ -67,6 +69,7 @@ class TrackingCandidate:
     tracking_number: str
     carrier: str
     source_domain: str = ""
+    merchant: dict[str, str] | None = None
 
 
 @dataclass(slots=True)
@@ -142,8 +145,8 @@ def _decode_text_part(part: Any) -> str:
     return html.unescape(decoded)
 
 
-def _message_search_text(raw_message: bytes) -> tuple[str, str, str]:
-    """Return subject, body text, and sender domain for one raw message."""
+def _message_search_text(raw_message: bytes) -> tuple[str, str, str, Any]:
+    """Return subject, body text, sender domain, and parsed message."""
     message = BytesParser(policy=policy.default).parsebytes(raw_message)
     subject = str(message.get("Subject", "") or "")
     sender = _sender_domain(message)
@@ -168,7 +171,33 @@ def _message_search_text(raw_message: bytes) -> tuple[str, str, str]:
         body_parts.append(text)
         chars += len(text)
 
-    return subject, "\n".join(body_parts), sender
+    return subject, "\n".join(body_parts), sender, message
+
+
+def _amazon_merchant_metadata(
+    message: Any,
+    subject: str,
+    body: str,
+    sender_domain: str,
+) -> dict[str, str] | None:
+    """Extract merchant metadata only from Amazon-authored shipping mail."""
+    if "amazon." not in sender_domain:
+        return None
+
+    combined = f"{subject}\n{body}"
+    match = AMAZON_ORDER_PATTERN.search(combined)
+    details = extract_amazon_order_details(subject, body, message) or {}
+    if not match and not details:
+        return None
+
+    metadata: dict[str, str] = {"merchant": "Amazon"}
+    if match:
+        metadata["order_id"] = match.group(0)
+    for key in ("name", "image"):
+        value = details.get(key)
+        if value:
+            metadata[key] = value
+    return metadata
 
 
 def _has_context(
@@ -201,13 +230,19 @@ def _has_context(
 def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
     """Extract conservative tracking candidates from one raw email."""
     try:
-        subject, body, sender_domain = _message_search_text(raw_message)
+        subject, body, sender_domain, message = _message_search_text(raw_message)
     except (TypeError, ValueError, UnicodeError):
         return []
 
     search_text = f"{subject}\n{body}"
     text_lower = search_text.lower()
     header_lower = f"{sender_domain} {subject}".lower()
+    merchant = _amazon_merchant_metadata(
+        message,
+        subject,
+        body,
+        sender_domain,
+    )
 
     candidates: list[TrackingCandidate] = []
     seen: set[str] = set()
@@ -234,6 +269,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
                     tracking_number=tracking,
                     carrier=pattern.carrier,
                     source_domain=sender_domain,
+                    merchant=merchant,
                 )
             )
 
@@ -316,6 +352,11 @@ def _register_message_candidates(
             description="Detected from configured shipping mail",
         )
         if changed:
+            result.state_changed = True
+        if candidate.merchant and registry.enrich_package_merchant(
+            candidate.tracking_number,
+            candidate.merchant,
+        ):
             result.state_changed = True
         if was_new and changed:
             result.detected.append(
