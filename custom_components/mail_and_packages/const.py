@@ -14,7 +14,7 @@ from .entity import MailandPackagesBinarySensorEntityDescription
 DOMAIN = "mail_and_packages"
 DOMAIN_DATA = f"{DOMAIN}_data"
 ASSET_ROOT: Final[Path] = Path(__file__).parent
-VERSION = "0.0.0-dev"  # Now updated by release workflow
+VERSION = "0.8.0b1"
 ISSUE_URL = "http://github.com/moralmunky/Home-Assistant-Mail-And-Packages"
 PLATFORM = "sensor"
 PLATFORMS = ["binary_sensor", "camera", "sensor"]
