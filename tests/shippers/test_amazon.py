@@ -17,6 +17,7 @@ from custom_components.mail_and_packages.const import (
     AMAZON_HUB_CODE,
     AMAZON_ORDER,
     AMAZON_ORDER_DETAILS,
+    AMAZON_REGISTRY_ORDERS,
     AMAZON_OTP,
     AMAZON_OTP_CODE,
     AMAZON_PACKAGES,
@@ -1504,3 +1505,8 @@ async def test_amazon_packages_order_details(hass):
     assert details["702-4925201-8953856"]["image"].startswith(
         "https://m.media-amazon.com/images/I/"
     )
+
+    registry_order = result[AMAZON_REGISTRY_ORDERS]["702-4925201-8953856"]
+    assert registry_order["status"] == "shipped"
+    assert registry_order["expected_delivery"] == "2026-07-20"
+    assert registry_order["name"].startswith("OLSA Giant Tumble Tower")
