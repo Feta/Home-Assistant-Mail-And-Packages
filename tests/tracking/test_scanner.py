@@ -49,7 +49,7 @@ def test_extracts_distinctive_tracking_formats():
     candidates = extract_tracking_candidates(
         _message(
             "UPS 1Z999AA10123456784, Amazon TBA123456789012, "
-            "USPS 9400111899560000000000, DHL JD01460000382800000001"
+            "USPS 9400111899560000000000, DHL JD014600007180009616"
         )
     )
 
@@ -57,7 +57,7 @@ def test_extracts_distinctive_tracking_formats():
     assert ("ups", "1Z999AA10123456784") in found
     assert ("amazon", "TBA123456789012") in found
     assert ("usps", "9400111899560000000000") in found
-    assert ("dhl", "JD01460000382800000001") in found
+    assert ("dhl", "JD014600007180009616") in found
 
 
 def test_extracts_international_alpha_suffix_formats():
