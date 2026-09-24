@@ -513,6 +513,45 @@ class PackageRegistry:
             }
             changed += 1
 
+        # A universal-scan pass may have already linked an Amazon order ID to a
+        # physical tracking number. Keep those package-level merchant records
+        # synchronized with the richer metadata extracted by the Amazon parser.
+        for tracking, package in self._packages.items():
+            merchant = package.get("merchant")
+            if not isinstance(merchant, dict):
+                continue
+            order_id = str(merchant.get("order_id") or "")
+            order = self._merchant_orders.get(order_id)
+            if not order:
+                continue
+
+            package_metadata = {
+                key: value
+                for key, value in order.items()
+                if key
+                in {
+                    "merchant",
+                    "order_id",
+                    "name",
+                    "image",
+                    "expected_delivery",
+                    "status",
+                }
+                and value not in (None, "")
+            }
+            existing_merchant = {
+                key: value
+                for key, value in merchant.items()
+                if value not in (None, "")
+            }
+            merged_merchant = {**existing_merchant, **package_metadata}
+            if merged_merchant == merchant:
+                continue
+
+            package["merchant"] = merged_merchant
+            package["last_updated"] = now
+            changed += 1
+
         return changed
 
     def enrich_package_merchant(
@@ -529,7 +568,15 @@ class PackageRegistry:
         clean = {
             key: value
             for key, value in merchant_data.items()
-            if key in {"merchant", "order_id", "name", "image", "expected_delivery"}
+            if key
+            in {
+                "merchant",
+                "order_id",
+                "name",
+                "image",
+                "expected_delivery",
+                "status",
+            }
             and value not in (None, "")
         }
         if not clean:
