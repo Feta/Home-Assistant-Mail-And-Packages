@@ -204,13 +204,16 @@ async def test_amazon_orders_and_merchant_metadata(registry):
             }
         }
     )
-    assert registry.enrich_package_merchant(
-        "1Z123",
-        {
-            "merchant": "Amazon",
-            "order_id": "123-1234567-1234567",
-        },
-    ) is False
+    assert (
+        registry.enrich_package_merchant(
+            "1Z123",
+            {
+                "merchant": "Amazon",
+                "order_id": "123-1234567-1234567",
+            },
+        )
+        is False
+    )
 
     data = registry.coordinator_data()
     amazon_order = data["registry_amazon_orders_list"][0]
