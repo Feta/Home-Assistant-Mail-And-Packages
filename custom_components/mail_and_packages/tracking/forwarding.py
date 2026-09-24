@@ -19,6 +19,15 @@ SEVENTEENTRACK_PROVIDER = "seventeentrack"
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderSnapshot:
+    """Snapshot of packages returned by the Home Assistant 17TRACK service."""
+
+    config_entry_id: str | None = None
+    service_available: bool = True
+    packages: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ForwardingResult:
     """Summary of one forwarding pass."""
 
@@ -59,17 +68,23 @@ def _friendly_name(tracking_number: str, package: dict[str, Any]) -> str:
     return f"{carrier} package {suffix}"
 
 
-async def _async_existing_remote_tracking(
+async def async_get_seventeentrack_snapshot(
     hass: HomeAssistant,
-    config_entry_id: str,
-    registry: PackageRegistry,
-) -> set[str]:
-    """Return tracking numbers already present in the selected 17TRACK account."""
+    configured_entry_id: str | None = None,
+) -> ProviderSnapshot:
+    """Fetch one validated package snapshot from Home Assistant 17TRACK."""
     if not hass.services.has_service(
         SEVENTEENTRACK_DOMAIN,
         SEVENTEENTRACK_GET_SERVICE,
     ):
-        return set()
+        return ProviderSnapshot(service_available=False)
+
+    config_entry_id = resolve_seventeentrack_config_entry(
+        hass,
+        configured_entry_id,
+    )
+    if config_entry_id is None:
+        return ProviderSnapshot(service_available=False)
 
     try:
         response = await hass.services.async_call(
@@ -81,32 +96,38 @@ async def _async_existing_remote_tracking(
         )
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning(
-            "Unable to query existing 17TRACK packages before forwarding (%s)",
+            "Unable to query 17TRACK package data (%s)",
             type(err).__name__,
         )
-        return set()
+        return ProviderSnapshot(
+            config_entry_id=config_entry_id,
+            service_available=False,
+        )
 
     if not isinstance(response, dict):
-        return set()
+        return ProviderSnapshot(
+            config_entry_id=config_entry_id,
+            service_available=False,
+        )
 
     packages = response.get("packages", [])
     if not isinstance(packages, list):
-        return set()
+        packages = []
 
-    existing: set[str] = set()
-    for package in packages:
-        if not isinstance(package, dict):
-            continue
-        tracking_number = package.get("tracking_number")
-        if tracking_number:
-            existing.add(registry.normalize_tracking_number(tracking_number))
-    return existing
+    valid_packages = tuple(
+        package for package in packages if isinstance(package, dict)
+    )
+    return ProviderSnapshot(
+        config_entry_id=config_entry_id,
+        packages=valid_packages,
+    )
 
 
 async def async_forward_pending_to_seventeentrack(
     hass: HomeAssistant,
     registry: PackageRegistry,
     configured_entry_id: str | None = None,
+    snapshot: ProviderSnapshot | None = None,
 ) -> ForwardingResult:
     """Forward unsubmitted active registry packages to Home Assistant 17TRACK."""
     if not hass.services.has_service(
@@ -115,11 +136,12 @@ async def async_forward_pending_to_seventeentrack(
     ):
         return ForwardingResult(service_available=False)
 
-    config_entry_id = resolve_seventeentrack_config_entry(
+    provider_snapshot = snapshot or await async_get_seventeentrack_snapshot(
         hass,
         configured_entry_id,
     )
-    if config_entry_id is None:
+    config_entry_id = provider_snapshot.config_entry_id
+    if not provider_snapshot.service_available or config_entry_id is None:
         return ForwardingResult(service_available=False)
 
     candidates = registry.get_forward_candidates(
@@ -129,11 +151,11 @@ async def async_forward_pending_to_seventeentrack(
     if not candidates:
         return ForwardingResult(config_entry_id=config_entry_id)
 
-    existing_remote = await _async_existing_remote_tracking(
-        hass,
-        config_entry_id,
-        registry,
-    )
+    existing_remote = {
+        registry.normalize_tracking_number(package["tracking_number"])
+        for package in provider_snapshot.packages
+        if package.get("tracking_number")
+    }
 
     forwarded = 0
     already_remote = 0
