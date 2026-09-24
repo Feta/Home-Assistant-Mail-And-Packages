@@ -197,10 +197,29 @@ async def test_amazon_orders_and_merchant_metadata(registry):
         },
     )
 
+    assert registry.reconcile_amazon_orders(
+        {
+            "123-1234567-1234567": {
+                "status": "delivered",
+            }
+        }
+    )
+    assert registry.enrich_package_merchant(
+        "1Z123",
+        {
+            "merchant": "Amazon",
+            "order_id": "123-1234567-1234567",
+        },
+    ) is False
+
     data = registry.coordinator_data()
-    assert data["registry_amazon_orders_list"][0]["order_id"] == ("123-1234567-1234567")
+    amazon_order = data["registry_amazon_orders_list"][0]
+    assert amazon_order["order_id"] == "123-1234567-1234567"
+    assert amazon_order["name"] == "Bambu Lab Filament Dryer"
+    assert amazon_order["status"] == "delivered"
     package = data["registry_packages_list"][0]
     assert package["merchant"]["merchant"] == "Amazon"
+    assert package["merchant"]["name"] == "Bambu Lab Filament Dryer"
 
 
 @pytest.mark.asyncio
