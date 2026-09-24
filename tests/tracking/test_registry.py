@@ -112,6 +112,100 @@ async def test_counts_and_coordinator_data(registry):
 
 
 @pytest.mark.asyncio
+async def test_provider_enrichment_advances_lifecycle(registry):
+    """17TRACK metadata should enrich and advance an existing package."""
+    await registry.async_load()
+    registry.register_package("1Z123", "ups", "detected", source="manual")
+
+    changes, transitions = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [
+            {
+                "tracking_number": "1Z123",
+                "status": "Delivered",
+                "location": "Hartford, CT",
+                "info_text": "Package delivered",
+                "timestamp": "2026-09-24T14:32:00+00:00",
+                "origin_country": "US",
+                "destination_country": "US",
+            }
+        ],
+    )
+
+    assert changes > 0
+    assert transitions[0]["status"] == "delivered"
+    package = registry.packages["1Z123"]
+    assert package["status"] == "delivered"
+    assert package["tracking_provider"]["provider"] == "seventeentrack"
+    assert package["tracking_provider"]["location"] == "Hartford, CT"
+
+
+@pytest.mark.asyncio
+async def test_provider_issue_does_not_downgrade_lifecycle(registry):
+    """Provider alert states should set an exception without downgrading lifecycle."""
+    await registry.async_load()
+    registry.register_package("1Z123", "ups", "in_transit")
+
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "1Z123", "status": "Alert"}],
+    )
+
+    assert registry.packages["1Z123"]["status"] == "in_transit"
+    assert registry.get_packages_list()[0]["exception"] is True
+
+
+@pytest.mark.asyncio
+async def test_provider_can_import_existing_remote_package(registry):
+    """17TRACK packages unknown to email parsing should still appear in the registry."""
+    await registry.async_load()
+
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "REMOTE123", "status": "In Transit"}],
+    )
+
+    assert registry.packages["REMOTE123"]["status"] == "in_transit"
+    assert registry.packages["REMOTE123"]["source"] == "seventeentrack"
+
+
+@pytest.mark.asyncio
+async def test_amazon_orders_and_merchant_metadata(registry):
+    """Amazon order metadata should persist separately and link when correlation exists."""
+    await registry.async_load()
+    assert registry.reconcile_amazon_orders(
+        {
+            "123-1234567-1234567": {
+                "name": "Bambu Lab Filament Dryer",
+                "image": "https://m.media-amazon.com/images/I/example.jpg",
+                "status": "shipped",
+                "expected_delivery": "2026-09-25",
+            }
+        }
+    )
+
+    registry.register_package("1Z123", "ups", "detected")
+    assert registry.enrich_package_merchant(
+        "1Z123",
+        {
+            "merchant": "Amazon",
+            "order_id": "123-1234567-1234567",
+            "name": "Bambu Lab Filament Dryer",
+        },
+    )
+
+    data = registry.coordinator_data()
+    assert data["registry_amazon_orders_list"][0]["order_id"] == (
+        "123-1234567-1234567"
+    )
+    package = data["registry_packages_list"][0]
+    assert package["merchant"]["merchant"] == "Amazon"
+
+
+@pytest.mark.asyncio
 async def test_auto_expire(registry):
     """Expired delivered, detected, and cleared records should be removed."""
     await registry.async_load()
