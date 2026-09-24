@@ -1,5 +1,6 @@
 """Tests for the local universal tracking-number scanner."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -220,6 +221,41 @@ async def test_scan_processes_newest_messages_in_bounded_batches(registry, accou
     assert not registry.is_uid_processed("Packages/2")
     assert registry.is_uid_processed("Packages/3")
     assert registry.is_uid_processed("Packages/4")
+
+
+@pytest.mark.asyncio
+async def test_scan_timeout_preserves_partial_progress(registry, account):
+    """Timeout should return already-processed state instead of discarding it."""
+    cache = MagicMock()
+
+    async def _fetch(email_id, *args, **kwargs):
+        if email_id == b"1":
+            return ("OK", [_message("Track package 1Z999AA10123456784")])
+        await asyncio.sleep(0.05)
+        return ("OK", [_message("Track package TBA123456789012")])
+
+    cache.fetch = AsyncMock(side_effect=_fetch)
+
+    with patch(
+        "custom_components.mail_and_packages.tracking.scanner._execute_single_search",
+        AsyncMock(return_value=[b"1", b"2"]),
+    ):
+        result = await async_scan_tracking_emails(
+            account,
+            cache,
+            registry,
+            "20-Sep-2026",
+            max_messages=75,
+            processed_uid_days=7,
+            timeout_seconds=0.01,
+        )
+
+    assert result.timed_out
+    assert result.scanned_messages == 1
+    assert registry.is_uid_processed("Packages/1")
+    assert not registry.is_uid_processed("Packages/2")
+    assert "1Z999AA10123456784" in registry.packages
+    assert "TBA123456789012" not in registry.packages
 
 
 @pytest.mark.asyncio
