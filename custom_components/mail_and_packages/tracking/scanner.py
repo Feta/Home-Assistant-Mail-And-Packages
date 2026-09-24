@@ -18,7 +18,9 @@ from typing import Any
 
 from aioimaplib import IMAP4_SSL
 
-from custom_components.mail_and_packages.utils.amazon import extract_amazon_order_details
+from custom_components.mail_and_packages.utils.amazon import (
+    extract_amazon_order_details,
+)
 from custom_components.mail_and_packages.utils.cache import EmailCache
 from custom_components.mail_and_packages.utils.imap import _execute_single_search
 
