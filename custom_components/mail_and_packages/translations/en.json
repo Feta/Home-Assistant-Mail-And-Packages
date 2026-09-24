@@ -62,14 +62,16 @@
           "exchange_mode": "Microsoft Exchange / Outlook compatibility mode",
           "registry_enabled": "Enable persistent package registry",
           "forward_to_seventeentrack": "Forward packages to 17TRACK",
-          "seventeentrack_config_entry": "17TRACK account"
+          "seventeentrack_config_entry": "17TRACK account",
+          "universal_tracking_scan": "Universal tracking scanner"
         },
         "data_description": {
           "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
           "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching).",
           "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local.",
           "forward_to_seventeentrack": "Automatically submit active package tracking numbers to Home Assistant's 17TRACK integration. Enabling this also enables the persistent package registry.",
-          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations."
+          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations.",
+          "universal_tracking_scan": "Scan only the configured mail folder(s) for recognizable tracking numbers that the normal carrier/vendor parsers missed. Message content is processed locally and is not sent to an AI service."
         },
         "description": "Finish the configuration by customizing the following based on your email structure and Home Assistant installation.\n\nIf using Amazon forwarded emails please separate each address with a comma.",
         "title": "Mail and Packages (Step 2 of 2)"
@@ -139,14 +141,16 @@
           "exchange_mode": "Microsoft Exchange / Outlook compatibility mode",
           "registry_enabled": "Enable persistent package registry",
           "forward_to_seventeentrack": "Forward packages to 17TRACK",
-          "seventeentrack_config_entry": "17TRACK account"
+          "seventeentrack_config_entry": "17TRACK account",
+          "universal_tracking_scan": "Universal tracking scanner"
         },
         "data_description": {
           "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
           "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching).",
           "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local.",
           "forward_to_seventeentrack": "Automatically submit active package tracking numbers to Home Assistant's 17TRACK integration. Enabling this also enables the persistent package registry.",
-          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations."
+          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations.",
+          "universal_tracking_scan": "Scan only the configured mail folder(s) for recognizable tracking numbers that the normal carrier/vendor parsers missed. Message content is processed locally and is not sent to an AI service."
         },
         "description": "Finish the configuration by customizing the following based on your email structure and Home Assistant installation.\n\nIf using Amazon forwarded emails please separate each address with a comma or enter (none) to clear this setting.",
         "title": "Mail and Packages (Step 2 of 2)"
@@ -249,14 +253,16 @@
           "exchange_mode": "Microsoft Exchange / Outlook compatibility mode",
           "registry_enabled": "Enable persistent package registry",
           "forward_to_seventeentrack": "Forward packages to 17TRACK",
-          "seventeentrack_config_entry": "17TRACK account"
+          "seventeentrack_config_entry": "17TRACK account",
+          "universal_tracking_scan": "Universal tracking scanner"
         },
         "data_description": {
           "imap_timeout": "Covers the entire scan — login plus every per-carrier IMAP search — not just connecting. Raise this if large mailboxes time out; lower it to fail faster.",
           "exchange_mode": "Enable compatibility workarounds for Microsoft Exchange/Outlook IMAP servers (avoids nested parentheses in search queries and limits subject batching).",
           "registry_enabled": "Keep discovered carrier tracking numbers across restarts and expose dashboard-friendly package lists. Processing remains local.",
           "forward_to_seventeentrack": "Automatically submit active package tracking numbers to Home Assistant's 17TRACK integration. Enabling this also enables the persistent package registry.",
-          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations."
+          "seventeentrack_config_entry": "Optional when exactly one 17TRACK integration is configured. Select an account when you have multiple 17TRACK integrations.",
+          "universal_tracking_scan": "Scan only the configured mail folder(s) for recognizable tracking numbers that the normal carrier/vendor parsers missed. Message content is processed locally and is not sent to an AI service."
         }
       },
       "options_3": {
