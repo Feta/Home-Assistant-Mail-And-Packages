@@ -33,12 +33,16 @@ from custom_components.mail_and_packages.const import (
     CONF_REGISTRY_DETECTED_DAYS,
     CONF_REGISTRY_ENABLED,
     CONF_SEVENTEENTRACK_CONFIG_ENTRY,
+    CONF_UNIVERSAL_TRACKING_SCAN,
     DEFAULT_CUSTOM_DAYS,
     DEFAULT_FORWARD_TO_SEVENTEENTRACK,
     DEFAULT_IMAP_TIMEOUT,
     DEFAULT_REGISTRY_DELIVERED_DAYS,
     DEFAULT_REGISTRY_DETECTED_DAYS,
     DEFAULT_REGISTRY_ENABLED,
+    DEFAULT_UNIVERSAL_SCAN_MAX_MESSAGES,
+    DEFAULT_UNIVERSAL_SCAN_TIMEOUT,
+    DEFAULT_UNIVERSAL_TRACKING_SCAN,
     MAX_TRACKING_AGE_DAYS,
 )
 from custom_components.mail_and_packages.helpers import copy_images
@@ -46,6 +50,7 @@ from custom_components.mail_and_packages.shippers import get_shipper_for_sensor
 from custom_components.mail_and_packages.tracking import (
     PackageRegistry,
     async_forward_pending_to_seventeentrack,
+    async_scan_tracking_emails,
 )
 from custom_components.mail_and_packages.utils.cache import EmailCache
 from custom_components.mail_and_packages.utils.image import (
@@ -271,6 +276,13 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             self._apply_tracking_state(data, tracking_details, today_iso)
             self._latch_mail_delivered(data, today_iso)
             await self._update_package_registry(data, tracking_details)
+            await self._async_scan_universal_tracking(
+                account,
+                cache,
+                since_date,
+                days,
+                data,
+            )
 
             # Aggregate global transit and delivered sensors
             self._aggregate_package_counts(data)
@@ -316,6 +328,54 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         for transition in transitions:
             event_type = f"{const.DOMAIN}_package_{transition['status']}"
             self.hass.bus.async_fire(event_type, transition)
+
+    async def _async_scan_universal_tracking(
+        self,
+        account: IMAP4_SSL,
+        cache: EmailCache,
+        since_date: str,
+        days: int,
+        data: dict,
+    ) -> None:
+        """Scan configured mail folders for tracking numbers missed by parsers."""
+        if self.registry is None or not self.config.get(
+            CONF_UNIVERSAL_TRACKING_SCAN,
+            DEFAULT_UNIVERSAL_TRACKING_SCAN,
+        ):
+            return
+
+        try:
+            async with asyncio.timeout(DEFAULT_UNIVERSAL_SCAN_TIMEOUT):
+                scan_result = await async_scan_tracking_emails(
+                    account,
+                    cache,
+                    self.registry,
+                    since_date,
+                    max_messages=DEFAULT_UNIVERSAL_SCAN_MAX_MESSAGES,
+                    processed_uid_days=max(days + 2, 7),
+                )
+        except TimeoutError:
+            _LOGGER.warning(
+                "Universal tracking scan timed out; remaining messages will be "
+                "processed on a later scan"
+            )
+            return
+
+        if scan_result.state_changed:
+            data.update(self.registry.coordinator_data())
+            await self.registry.async_save()
+
+        for detected in scan_result.detected:
+            self.hass.bus.async_fire(
+                f"{const.DOMAIN}_package_detected",
+                detected,
+            )
+
+        if scan_result.fetch_failures:
+            _LOGGER.debug(
+                "Universal tracking scan skipped %s message(s) after fetch failures",
+                scan_result.fetch_failures,
+            )
 
     async def _async_forward_registry_packages(self, data: dict) -> None:
         """Forward packages without coupling provider latency to the IMAP scan."""
