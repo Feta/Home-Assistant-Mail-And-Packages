@@ -1,13 +1,18 @@
 {
   "domain": "mail_and_packages",
   "name": "Mail and Packages",
-  "after_dependencies": ["cloud"],
+  "after_dependencies": [
+    "cloud"
+  ],
   "codeowners": [
     "@moralmunky",
-    "@firstof9"
+    "@firstof9",
+    "@Feta"
   ],
   "config_flow": true,
-  "dependencies": ["application_credentials"],
+  "dependencies": [
+    "application_credentials"
+  ],
   "documentation": "https://github.com/moralmunky/Home-Assistant-Mail-And-Packages",
   "integration_type": "service",
   "iot_class": "cloud_polling",
@@ -18,5 +23,5 @@
     "dateparser",
     "aioimaplib"
   ],
-  "version": "0.0.0-dev"
+  "version": "0.7.0b1"
 }
