@@ -223,6 +223,9 @@ async def test_amazon_orders_and_merchant_metadata(registry):
     package = data["registry_packages_list"][0]
     assert package["merchant"]["merchant"] == "Amazon"
     assert package["merchant"]["name"] == "Bambu Lab Filament Dryer"
+    assert package["merchant"]["status"] == "delivered"
+    assert package["merchant"]["expected_delivery"] == "2026-09-25"
+    assert package["merchant"]["image"].startswith("https://m.media-amazon.com/")
 
 
 @pytest.mark.asyncio
