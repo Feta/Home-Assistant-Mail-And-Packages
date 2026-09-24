@@ -6,6 +6,7 @@ Mail and Packages. It does not call external services or log message content.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -74,6 +75,7 @@ class UniversalScanResult:
     scanned_messages: int = 0
     fetch_failures: int = 0
     state_changed: bool = False
+    timed_out: bool = False
     detected: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -278,69 +280,82 @@ async def async_scan_tracking_emails(
     *,
     max_messages: int,
     processed_uid_days: int,
+    timeout_seconds: float | None = None,
 ) -> UniversalScanResult:
     """Scan unprocessed messages in configured folders for tracking numbers."""
     result = UniversalScanResult()
 
-    expired_uids = registry.expire_processed_uids(processed_uid_days)
-    if expired_uids:
-        result.state_changed = True
-
-    email_ids = await _execute_single_search(account, f"SINCE {since_date}")
-    unprocessed = [
-        email_id
-        for email_id in email_ids
-        if not registry.is_uid_processed(_processed_uid_key(account, email_id))
-    ]
-    if max_messages > 0:
-        unprocessed = unprocessed[-max_messages:]
-
-    _LOGGER.debug(
-        "Universal tracking scan considering %s unprocessed message(s)",
-        len(unprocessed),
-    )
-
-    for email_id in unprocessed:
-        fetched = await cache.fetch(
-            email_id,
-            "(BODY.PEEK[])",
-            shipper="universal",
-        )
-        if not isinstance(fetched, tuple) or len(fetched) < 2 or fetched[0] != "OK":
-            result.fetch_failures += 1
-            continue
-
-        uid_key = _processed_uid_key(account, email_id)
-        message_candidates: dict[str, TrackingCandidate] = {}
-        for raw_message in _iter_raw_messages(fetched[1]):
-            for candidate in extract_tracking_candidates(raw_message):
-                message_candidates.setdefault(candidate.tracking_number, candidate)
-
-        for candidate in message_candidates.values():
-            was_new = candidate.tracking_number not in registry.packages
-            changed = registry.register_package(
-                candidate.tracking_number,
-                candidate.carrier,
-                status="detected",
-                source="universal_scan",
-                source_from=candidate.source_domain,
-                description="Detected from configured shipping mail",
-            )
-            if changed:
-                result.state_changed = True
-            if was_new and changed:
-                result.detected.append(
-                    {
-                        "tracking_number": candidate.tracking_number,
-                        "carrier": candidate.carrier,
-                        "status": "detected",
-                        "previous_status": "",
-                        "source": "universal_scan",
-                    }
-                )
-
-        if registry.mark_uid_processed(uid_key):
+    async def _run_scan() -> None:
+        expired_uids = registry.expire_processed_uids(processed_uid_days)
+        if expired_uids:
             result.state_changed = True
-        result.scanned_messages += 1
+
+        email_ids = await _execute_single_search(account, f"SINCE {since_date}")
+        unprocessed = [
+            email_id
+            for email_id in email_ids
+            if not registry.is_uid_processed(_processed_uid_key(account, email_id))
+        ]
+        if max_messages > 0:
+            unprocessed = unprocessed[-max_messages:]
+
+        _LOGGER.debug(
+            "Universal tracking scan considering %s unprocessed message(s)",
+            len(unprocessed),
+        )
+
+        for email_id in unprocessed:
+            fetched = await cache.fetch(
+                email_id,
+                "(BODY.PEEK[])",
+                shipper="universal",
+            )
+            if not isinstance(fetched, tuple) or len(fetched) < 2 or fetched[0] != "OK":
+                result.fetch_failures += 1
+                continue
+
+            uid_key = _processed_uid_key(account, email_id)
+            message_candidates: dict[str, TrackingCandidate] = {}
+            for raw_message in _iter_raw_messages(fetched[1]):
+                for candidate in extract_tracking_candidates(raw_message):
+                    message_candidates.setdefault(candidate.tracking_number, candidate)
+
+            for candidate in message_candidates.values():
+                was_new = candidate.tracking_number not in registry.packages
+                changed = registry.register_package(
+                    candidate.tracking_number,
+                    candidate.carrier,
+                    status="detected",
+                    source="universal_scan",
+                    source_from=candidate.source_domain,
+                    description="Detected from configured shipping mail",
+                )
+                if changed:
+                    result.state_changed = True
+                if was_new and changed:
+                    result.detected.append(
+                        {
+                            "tracking_number": candidate.tracking_number,
+                            "carrier": candidate.carrier,
+                            "status": "detected",
+                            "previous_status": "",
+                            "source": "universal_scan",
+                        }
+                    )
+
+            if registry.mark_uid_processed(uid_key):
+                result.state_changed = True
+            result.scanned_messages += 1
+
+
+    if timeout_seconds is None:
+        await _run_scan()
+        return result
+
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            await _run_scan()
+    except TimeoutError:
+        result.timed_out = True
 
     return result
