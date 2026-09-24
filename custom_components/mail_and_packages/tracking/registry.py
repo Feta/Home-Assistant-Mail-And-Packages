@@ -19,6 +19,19 @@ STATUS_RANK = {
     "cleared": 4,
 }
 
+PROVIDER_STATUS_LIFECYCLE = {
+    "in_transit": "in_transit",
+    "out_for_delivery": "out_for_delivery",
+    "ready_to_be_picked_up": "in_transit",
+    "delivered": "delivered",
+}
+PROVIDER_EXCEPTION_STATUSES = {
+    "alert",
+    "expired",
+    "not_found",
+    "undelivered",
+}
+
 
 class PackageRegistry:
     """Persist package lifecycle state across restarts."""
@@ -31,6 +44,7 @@ class PackageRegistry:
             f"{STORAGE_KEY_PREFIX}.{entry_id}",
         )
         self._packages: dict[str, dict[str, Any]] = {}
+        self._merchant_orders: dict[str, dict[str, Any]] = {}
         self._processed_uids: dict[str, str] = {}
         self._loaded = False
 
@@ -44,6 +58,11 @@ class PackageRegistry:
         """Return all package records, including cleared records."""
         return self._packages
 
+    @property
+    def merchant_orders(self) -> dict[str, dict[str, Any]]:
+        """Return persisted merchant-order records."""
+        return self._merchant_orders
+
     async def async_load(self) -> None:
         """Load registry data from Home Assistant storage once."""
         if self._loaded:
@@ -51,13 +70,18 @@ class PackageRegistry:
         data = await self._store.async_load()
         if isinstance(data, dict):
             self._packages = data.get("packages", {})
+            self._merchant_orders = data.get("merchant_orders", {})
             self._processed_uids = data.get("processed_uids", {})
         self._loaded = True
 
     async def async_save(self) -> None:
         """Persist current registry data."""
         await self._store.async_save(
-            {"packages": self._packages, "processed_uids": self._processed_uids}
+            {
+                "packages": self._packages,
+                "merchant_orders": self._merchant_orders,
+                "processed_uids": self._processed_uids,
+            }
         )
 
     async def async_remove(self) -> None:
@@ -300,6 +324,226 @@ class PackageRegistry:
             candidates.append((tracking, package))
         return candidates
 
+    @staticmethod
+    def _normalize_provider_status(status: Any) -> str:
+        """Normalize a provider status to a stable snake-case key."""
+        return "_".join(str(status or "").strip().lower().replace("-", " ").split())
+
+    @staticmethod
+    def _provider_metadata(
+        provider: str,
+        config_entry_id: str,
+        remote: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        """Build a privacy-minimized provider snapshot for one package."""
+        metadata = {
+            "provider": provider,
+            "config_entry_id": config_entry_id,
+            "status": str(remote.get("status") or ""),
+            "status_key": PackageRegistry._normalize_provider_status(
+                remote.get("status")
+            ),
+            "location": remote.get("location"),
+            "info_text": remote.get("info_text"),
+            "timestamp": remote.get("timestamp"),
+            "friendly_name": remote.get("friendly_name"),
+            "origin_country": remote.get("origin_country"),
+            "destination_country": remote.get("destination_country"),
+            "package_type": remote.get("package_type"),
+            "tracking_info_language": remote.get("tracking_info_language"),
+            "synced_at": now,
+        }
+        return {key: value for key, value in metadata.items() if value not in (None, "")}
+
+    def reconcile_tracking_provider_packages(
+        self,
+        provider: str,
+        config_entry_id: str,
+        remote_packages: list[dict[str, Any]],
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Merge tracking-provider status and metadata into the registry."""
+        changed_count = 0
+        transitions: list[dict[str, Any]] = []
+        now = datetime.now(UTC).isoformat()
+
+        for remote in remote_packages:
+            if not isinstance(remote, dict):
+                continue
+            raw_tracking = remote.get("tracking_number")
+            if not raw_tracking:
+                continue
+
+            tracking = self.normalize_tracking_number(raw_tracking)
+            status_key = self._normalize_provider_status(remote.get("status"))
+            lifecycle = PROVIDER_STATUS_LIFECYCLE.get(status_key)
+
+            package = self._packages.get(tracking)
+            if package is None:
+                initial_status = lifecycle or "detected"
+                if not self.register_package(
+                    tracking,
+                    "unknown",
+                    initial_status,
+                    source=provider,
+                    description=str(remote.get("friendly_name") or ""),
+                ):
+                    continue
+                package = self._packages[tracking]
+                changed_count += 1
+
+            if package.get("status") == "cleared":
+                continue
+
+            provider_metadata = self._provider_metadata(
+                provider,
+                config_entry_id,
+                remote,
+                now,
+            )
+            previous_provider = package.get("tracking_provider")
+            comparable_previous = (
+                {
+                    key: value
+                    for key, value in previous_provider.items()
+                    if key != "synced_at"
+                }
+                if isinstance(previous_provider, dict)
+                else {}
+            )
+            comparable_new = {
+                key: value
+                for key, value in provider_metadata.items()
+                if key != "synced_at"
+            }
+            if comparable_previous != comparable_new:
+                package["tracking_provider"] = provider_metadata
+                package["last_updated"] = now
+                changed_count += 1
+
+            previous_status = package.get("status", "detected")
+            if (
+                lifecycle
+                and STATUS_RANK.get(lifecycle, 0)
+                > STATUS_RANK.get(previous_status, 0)
+            ):
+                package["status"] = lifecycle
+                package["last_updated"] = now
+                changed_count += 1
+                transitions.append(
+                    {
+                        "tracking_number": tracking,
+                        "carrier": package.get("carrier", "unknown"),
+                        "status": lifecycle,
+                        "previous_status": previous_status,
+                        "source": provider,
+                    }
+                )
+
+            provider_exception = status_key in PROVIDER_EXCEPTION_STATUSES
+            if package.get("provider_exception", False) != provider_exception:
+                package["provider_exception"] = provider_exception
+                package["last_updated"] = now
+                changed_count += 1
+
+        return changed_count, transitions
+
+    def reconcile_amazon_orders(
+        self,
+        orders: dict[str, dict[str, Any]],
+    ) -> int:
+        """Persist Amazon order metadata extracted from shipping emails."""
+        if not isinstance(orders, dict):
+            return 0
+
+        changed = 0
+        now = datetime.now(UTC).isoformat()
+        allowed = {
+            "name",
+            "image",
+            "status",
+            "expected_delivery",
+            "source_domain",
+        }
+
+        for order_id, metadata in orders.items():
+            if not order_id or not isinstance(metadata, dict):
+                continue
+
+            incoming = {
+                key: value
+                for key, value in metadata.items()
+                if key in allowed and value not in (None, "")
+            }
+            incoming.update(
+                {
+                    "merchant": "Amazon",
+                    "order_id": str(order_id),
+                }
+            )
+
+            existing = self._merchant_orders.get(str(order_id))
+            comparable_existing = (
+                {
+                    key: value
+                    for key, value in existing.items()
+                    if key not in ("first_seen", "last_updated")
+                }
+                if isinstance(existing, dict)
+                else {}
+            )
+            if comparable_existing == incoming:
+                continue
+
+            first_seen = (
+                existing.get("first_seen", now)
+                if isinstance(existing, dict)
+                else now
+            )
+            self._merchant_orders[str(order_id)] = {
+                **incoming,
+                "first_seen": first_seen,
+                "last_updated": now,
+            }
+            changed += 1
+
+        return changed
+
+    def enrich_package_merchant(
+        self,
+        tracking_number: str,
+        merchant_data: dict[str, Any],
+    ) -> bool:
+        """Attach merchant metadata when an email links it to a tracking number."""
+        tracking = self.normalize_tracking_number(tracking_number)
+        package = self._packages.get(tracking)
+        if not package or package.get("status") == "cleared":
+            return False
+
+        clean = {
+            key: value
+            for key, value in merchant_data.items()
+            if key in {"merchant", "order_id", "name", "image", "expected_delivery"}
+            and value not in (None, "")
+        }
+        if not clean:
+            return False
+
+        if package.get("merchant") == clean:
+            return False
+
+        package["merchant"] = clean
+        package["last_updated"] = datetime.now(UTC).isoformat()
+        return True
+
+    def get_amazon_orders_list(self) -> list[dict[str, Any]]:
+        """Return Amazon order metadata for dashboard use."""
+        return sorted(
+            self._merchant_orders.values(),
+            key=lambda item: item.get("last_updated", ""),
+            reverse=True,
+        )
+
     def set_exception(self, tracking_number: str, value: bool = True) -> bool:
         """Set or clear the exception flag for an active package."""
         tracking = self.normalize_tracking_number(tracking_number)
@@ -379,7 +623,23 @@ class PackageRegistry:
                 to_remove.append(tracking)
         for tracking in to_remove:
             self._packages.pop(tracking, None)
-        return len(to_remove)
+
+        removed = len(to_remove)
+        for order_id, order in list(self._merchant_orders.items()):
+            try:
+                order_updated = datetime.fromisoformat(order["last_updated"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            order_age = (now - order_updated).days
+            order_status = order.get("status", "shipped")
+            if (
+                (order_status == "delivered" and order_age >= delivered_days)
+                or order_age >= detected_days
+            ):
+                self._merchant_orders.pop(order_id, None)
+                removed += 1
+
+        return removed
 
     def get_counts(self) -> dict[str, int]:
         """Return tracked, in-transit, and delivered package counts."""
@@ -417,7 +677,10 @@ class PackageRegistry:
                     "tracking_number": tracking,
                     "carrier": package.get("carrier", "unknown"),
                     "status": status,
-                    "exception": package.get("exception", False),
+                    "exception": bool(
+                        package.get("exception", False)
+                        or package.get("provider_exception", False)
+                    ),
                     "source": package.get("source", "unknown"),
                     "first_seen": package.get("first_seen", ""),
                     "last_updated": package.get("last_updated", ""),
@@ -427,6 +690,8 @@ class PackageRegistry:
                         if isinstance(package.get("forwarded_to"), dict)
                         else []
                     ),
+                    "tracking_provider": package.get("tracking_provider"),
+                    "merchant": package.get("merchant"),
                 }
             )
         return result
@@ -441,4 +706,5 @@ class PackageRegistry:
             "registry_packages_list": self.get_packages_list(),
             "registry_in_transit_list": self.get_packages_list("in_transit"),
             "registry_delivered_list": self.get_packages_list("delivered"),
+            "registry_amazon_orders_list": self.get_amazon_orders_list(),
         }
