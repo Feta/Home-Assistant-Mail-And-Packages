@@ -19,6 +19,7 @@ from custom_components.mail_and_packages.const import (
     AMAZON_HUB_SUBJECT,
     AMAZON_ORDER,
     AMAZON_ORDER_DETAILS,
+    AMAZON_REGISTRY_ORDERS,
     AMAZON_OTP,
     AMAZON_OTP_REGEX,
     AMAZON_OTP_SUBJECT,
@@ -102,10 +103,14 @@ class AmazonShipper(AmazonSearchMixin, Shipper):
             details = await self._parse_amazon_emails(
                 account, "details", fwds, days, domain, cache, forwarding_header
             )
+            registry_orders = await self._parse_amazon_emails(
+                account, "registry", fwds, days, domain, cache, forwarding_header
+            )
             return {
                 AMAZON_PACKAGES: count,
                 AMAZON_ORDER: orders,
                 AMAZON_ORDER_DETAILS: details,
+                AMAZON_REGISTRY_ORDERS: registry_orders,
             }
 
         if sensor_type == AMAZON_DELIVERING:
