@@ -71,6 +71,26 @@ def test_extracts_international_alpha_suffix_formats():
     assert ("auspost", "CD123456789AU") in found
 
 
+def test_amazon_tracking_carries_order_and_item_metadata():
+    """Amazon-authored tracking mail should enrich the package merchant data."""
+    candidates = extract_tracking_candidates(
+        _message(
+            "Order #123-1234567-1234567\n"
+            "Track package 1Z999AA10123456784\n"
+            "* Bambu Lab Filament Dryer",
+            subject='Shipped: "Bambu Lab Filament Dryer"',
+            sender="shipment-tracking@amazon.com",
+        )
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].merchant == {
+        "merchant": "Amazon",
+        "order_id": "123-1234567-1234567",
+        "name": "Bambu Lab Filament Dryer",
+    }
+
+
 def test_fedex_numeric_requires_shipping_context():
     """Ambiguous numeric strings should not be accepted without carrier context."""
     candidates = extract_tracking_candidates(
@@ -147,13 +167,52 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     assert result.state_changed
     assert registry.packages["1Z999AA10123456784"]["source"] == "universal_scan"
     assert registry.packages["1Z999AA10123456784"]["source_from"] == "example.com"
-    assert registry.is_uid_processed("v1:Packages/123")
+    assert registry.is_uid_processed("v2:Packages/123")
+
+
+@pytest.mark.asyncio
+async def test_scan_links_amazon_metadata_to_registered_package(registry, account):
+    """Scanner should attach Amazon order metadata to the detected tracking record."""
+    cache = MagicMock()
+    cache.fetch = AsyncMock(
+        return_value=(
+            "OK",
+            [
+                _message(
+                    "Order #123-1234567-1234567\n"
+                    "Track package 1Z999AA10123456784\n"
+                    "* Bambu Lab Filament Dryer",
+                    subject='Shipped: "Bambu Lab Filament Dryer"',
+                    sender="shipment-tracking@amazon.com",
+                )
+            ],
+        )
+    )
+
+    with patch(
+        "custom_components.mail_and_packages.tracking.scanner._execute_single_search",
+        AsyncMock(return_value=[b"456"]),
+    ):
+        await async_scan_tracking_emails(
+            account,
+            cache,
+            registry,
+            "20-Sep-2026",
+            max_messages=75,
+            processed_uid_days=7,
+        )
+
+    assert registry.packages["1Z999AA10123456784"]["merchant"] == {
+        "merchant": "Amazon",
+        "order_id": "123-1234567-1234567",
+        "name": "Bambu Lab Filament Dryer",
+    }
 
 
 @pytest.mark.asyncio
 async def test_scan_skips_previously_processed_uid(registry, account):
     """Previously processed messages should not be fetched again."""
-    registry.mark_uid_processed("v1:Packages/123")
+    registry.mark_uid_processed("v2:Packages/123")
     cache = MagicMock()
     cache.fetch = AsyncMock()
 
@@ -194,7 +253,7 @@ async def test_scan_retries_fetch_failure(registry, account):
         )
 
     assert result.fetch_failures == 1
-    assert not registry.is_uid_processed("v1:Packages/123")
+    assert not registry.is_uid_processed("v2:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -283,4 +342,4 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
 
     assert not result.detected
     assert registry.packages["1Z999AA10123456784"]["status"] == "cleared"
-    assert registry.is_uid_processed("v1:Packages/123")
+    assert registry.is_uid_processed("v2:Packages/123")
