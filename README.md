@@ -41,6 +41,26 @@ See the [wiki](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wi
 > - `sensor.mail_image_system_path`
 > - `sensor.mail_image_url` *(requires `External_URL` or `Internal_URL` to be set in HA general settings)*
 
+## Super Tracking Beta
+
+This fork contains an experimental, opt-in package tracking pipeline built on the current upstream `dev` codebase. It adds a persistent package registry, forwarding through Home Assistant's official 17TRACK integration, and a local universal tracking-number scanner.
+
+The beta does not add cloud LLM email analysis, Amazon cookie scraping, or direct 17TRACK credentials. Gmail OAuth and the current upstream IMAP implementation remain intact.
+
+### Install this beta with HACS
+
+If the upstream **Mail and Packages** repository is already installed through HACS, uninstall the HACS repository download first **without deleting the Home Assistant Mail and Packages integration/config entry**.
+
+Then in HACS:
+
+1. Open **Custom repositories**.
+2. Add `https://github.com/Feta/Home-Assistant-Mail-And-Packages`.
+3. Select **Integration** as the repository type.
+4. Install **Mail and Packages Super Tracking (Beta)**.
+5. Restart Home Assistant.
+
+The integration domain remains `mail_and_packages`, so this beta replaces the code used by the existing Mail and Packages config entry rather than installing a second copy.
+
 ## Installation
 
 ### HACS (recommended)
