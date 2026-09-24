@@ -222,7 +222,14 @@ class RegistrySensor(PackagesSensor):
         }.get(self.type)
         if not attr_key:
             return {}
-        return {"packages": data.get(attr_key, [])}
+
+        attributes = {"packages": data.get(attr_key, [])}
+        if self.type == "registry_tracked":
+            attributes["amazon_orders"] = data.get(
+                "registry_amazon_orders_list",
+                [],
+            )
+        return attributes
 
 
 class ImagePathSensors(CoordinatorEntity, RestoreSensor):
