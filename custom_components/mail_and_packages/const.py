@@ -239,6 +239,7 @@ AMAZON_EMAIL = [
 AMAZON_PACKAGES = "amazon_packages"
 AMAZON_ORDER = "amazon_order"
 AMAZON_ORDER_DETAILS = "amazon_order_details"
+AMAZON_REGISTRY_ORDERS = "_amazon_registry_orders"
 AMAZON_DELIVERED = "amazon_delivered"
 AMAZON_DELIVERING = "amazon_delivering"
 AMAZON_IMG_LIST = [
