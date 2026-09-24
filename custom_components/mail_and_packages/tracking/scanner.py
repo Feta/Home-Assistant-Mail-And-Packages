@@ -27,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
+SCANNER_UID_VERSION = 1
 
 TRACKING_CONTEXT_KEYWORDS = (
     "tracking",
@@ -263,13 +264,13 @@ def _processed_uid_key(account: IMAP4_SSL, email_id: str | bytes) -> str:
     """Build a folder-aware stable key for a message UID."""
     uid = email_id.decode() if isinstance(email_id, bytes) else str(email_id)
     if "/" in uid:
-        return uid
+        return f"v{SCANNER_UID_VERSION}:{uid}"
 
     folders = getattr(account, "_folders", None)
     folder = getattr(account, "_current_folder", None)
     if not folder and isinstance(folders, (list, tuple)) and folders:
         folder = folders[0]
-    return f"{folder or 'INBOX'}/{uid}"
+    return f"v{SCANNER_UID_VERSION}:{folder or 'INBOX'}/{uid}"
 
 
 def _select_unprocessed_email_ids(
