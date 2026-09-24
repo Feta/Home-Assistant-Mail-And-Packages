@@ -31,6 +31,7 @@ from custom_components.mail_and_packages.const import (
     CONF_REGISTRY_ENABLED,
     CONF_SEVENTEENTRACK_CONFIG_ENTRY,
     CONF_STORAGE,
+    CONF_UNIVERSAL_TRACKING_SCAN,
     CONF_UPS_CUSTOM_IMG,
     CONF_UPS_CUSTOM_IMG_FILE,
     CONF_WALMART_CUSTOM_IMG,
@@ -230,13 +231,19 @@ async def _validate_forwarded_emails(user_input: dict, errors: dict) -> None:
 def _normalize_tracking_options(user_input: dict) -> None:
     """Normalize registry and tracking-forwarding options."""
     forward_enabled = bool(user_input.get(CONF_FORWARD_TO_SEVENTEENTRACK, False))
+    universal_scan_enabled = bool(
+        user_input.get(CONF_UNIVERSAL_TRACKING_SCAN, False)
+    )
 
-    if forward_enabled:
-        # Persistent registry state is required to make forwarding idempotent.
+    if forward_enabled or universal_scan_enabled:
+        # Persistent state is required for forwarding idempotency and UID dedupe.
         user_input[CONF_REGISTRY_ENABLED] = True
     else:
         user_input.pop(CONF_FORWARD_TO_SEVENTEENTRACK, None)
         user_input.pop(CONF_SEVENTEENTRACK_CONFIG_ENTRY, None)
+
+    if not universal_scan_enabled:
+        user_input.pop(CONF_UNIVERSAL_TRACKING_SCAN, None)
 
     if not user_input.get(CONF_REGISTRY_ENABLED, False):
         user_input.pop(CONF_REGISTRY_ENABLED, None)
