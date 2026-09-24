@@ -136,12 +136,12 @@ async def async_forward_pending_to_seventeentrack(
     ):
         return ForwardingResult(service_available=False)
 
-    provider_snapshot = snapshot or await async_get_seventeentrack_snapshot(
-        hass,
-        configured_entry_id,
+    config_entry_id = (
+        snapshot.config_entry_id
+        if snapshot is not None
+        else resolve_seventeentrack_config_entry(hass, configured_entry_id)
     )
-    config_entry_id = provider_snapshot.config_entry_id
-    if not provider_snapshot.service_available or config_entry_id is None:
+    if config_entry_id is None:
         return ForwardingResult(service_available=False)
 
     candidates = registry.get_forward_candidates(
@@ -150,6 +150,16 @@ async def async_forward_pending_to_seventeentrack(
     )
     if not candidates:
         return ForwardingResult(config_entry_id=config_entry_id)
+
+    provider_snapshot = snapshot or await async_get_seventeentrack_snapshot(
+        hass,
+        config_entry_id,
+    )
+    if not provider_snapshot.service_available:
+        return ForwardingResult(
+            config_entry_id=config_entry_id,
+            service_available=False,
+        )
 
     existing_remote = {
         registry.normalize_tracking_number(package["tracking_number"])
