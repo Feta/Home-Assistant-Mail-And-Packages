@@ -276,10 +276,10 @@ async def test_scan_processes_newest_messages_in_bounded_batches(registry, accou
         )
 
     assert result.scanned_messages == 2
-    assert not registry.is_uid_processed("v1:Packages/1")
-    assert not registry.is_uid_processed("v1:Packages/2")
-    assert registry.is_uid_processed("v1:Packages/3")
-    assert registry.is_uid_processed("v1:Packages/4")
+    assert not registry.is_uid_processed("v2:Packages/1")
+    assert not registry.is_uid_processed("v2:Packages/2")
+    assert registry.is_uid_processed("v2:Packages/3")
+    assert registry.is_uid_processed("v2:Packages/4")
 
 
 @pytest.mark.asyncio
@@ -311,8 +311,8 @@ async def test_scan_timeout_preserves_partial_progress(registry, account):
 
     assert result.timed_out
     assert result.scanned_messages == 1
-    assert registry.is_uid_processed("v1:Packages/1")
-    assert not registry.is_uid_processed("v1:Packages/2")
+    assert registry.is_uid_processed("v2:Packages/1")
+    assert not registry.is_uid_processed("v2:Packages/2")
     assert "1Z999AA10123456784" in registry.packages
     assert "TBA123456789012" not in registry.packages
 
