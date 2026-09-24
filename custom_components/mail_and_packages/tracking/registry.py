@@ -312,7 +312,7 @@ class PackageRegistry:
     ) -> list[tuple[str, dict[str, Any]]]:
         """Return active packages not yet sent to a provider account."""
         candidates: list[tuple[str, dict[str, Any]]] = []
-        for tracking, package in self._packages.items():
+        for package in self._packages.values():
             if package.get("status") not in (
                 "detected",
                 "in_transit",
@@ -540,9 +540,7 @@ class PackageRegistry:
                 and value not in (None, "")
             }
             existing_merchant = {
-                key: value
-                for key, value in merchant.items()
-                if value not in (None, "")
+                key: value for key, value in merchant.items() if value not in (None, "")
             }
             merged_merchant = {**existing_merchant, **package_metadata}
             if merged_merchant == merchant:
