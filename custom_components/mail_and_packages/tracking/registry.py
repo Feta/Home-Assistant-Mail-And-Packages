@@ -312,7 +312,7 @@ class PackageRegistry:
     ) -> list[tuple[str, dict[str, Any]]]:
         """Return active packages not yet sent to a provider account."""
         candidates: list[tuple[str, dict[str, Any]]] = []
-        for package in self._packages.values():
+        for tracking, package in self._packages.items():
             if package.get("status") not in (
                 "detected",
                 "in_transit",
