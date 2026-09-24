@@ -9,6 +9,7 @@ from custom_components.mail_and_packages.tracking.forwarding import (
     SEVENTEENTRACK_DOMAIN,
     SEVENTEENTRACK_GET_SERVICE,
     async_forward_pending_to_seventeentrack,
+    async_get_seventeentrack_snapshot,
     resolve_seventeentrack_config_entry,
 )
 from custom_components.mail_and_packages.tracking.registry import PackageRegistry
@@ -55,6 +56,31 @@ def test_resolve_ambiguous_seventeentrack_entries():
     hass.config_entries.async_entries.return_value = [entry, second]
 
     assert resolve_seventeentrack_config_entry(hass, None) is None
+
+
+@pytest.mark.asyncio
+async def test_snapshot_preserves_17track_metadata():
+    """Provider snapshot should retain fields used by registry enrichment."""
+    hass, entry = _hass_with_entry()
+    hass.services.has_service.return_value = True
+    hass.services.async_call = AsyncMock(
+        return_value={
+            "packages": [
+                {
+                    "tracking_number": "1Z123",
+                    "status": "In Transit",
+                    "location": "Hartford, CT",
+                    "info_text": "Departed facility",
+                }
+            ]
+        }
+    )
+
+    snapshot = await async_get_seventeentrack_snapshot(hass, entry.entry_id)
+
+    assert snapshot.service_available
+    assert snapshot.config_entry_id == entry.entry_id
+    assert snapshot.packages[0]["location"] == "Hartford, CT"
 
 
 @pytest.mark.asyncio
