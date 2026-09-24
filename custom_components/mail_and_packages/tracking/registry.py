@@ -516,7 +516,7 @@ class PackageRegistry:
         # A universal-scan pass may have already linked an Amazon order ID to a
         # physical tracking number. Keep those package-level merchant records
         # synchronized with the richer metadata extracted by the Amazon parser.
-        for tracking, package in self._packages.items():
+        for package in self._packages.values():
             merchant = package.get("merchant")
             if not isinstance(merchant, dict):
                 continue
