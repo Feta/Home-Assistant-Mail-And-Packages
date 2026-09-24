@@ -105,6 +105,9 @@ class AmazonSearchMixin(AmazonImageMixin):
         if param == "count":
             return final_count
 
+        if param == "registry":
+            return self._build_registry_orders(context)
+
         orders = [
             order_id
             for order_id in context["all_shipped_orders"]
@@ -124,6 +127,32 @@ class AmazonSearchMixin(AmazonImageMixin):
             }
 
         return orders
+
+    @staticmethod
+    def _build_registry_orders(ctx: dict) -> dict[str, dict[str, str]]:
+        """Build persistent order metadata without exposing email content."""
+        result: dict[str, dict[str, str]] = {}
+        order_ids = set(ctx["all_shipped_orders"]) | set(ctx["delivered_packages"])
+
+        for order_id in order_ids:
+            delivered = ctx["delivered_packages"].get(order_id, 0)
+            delivering = ctx["packages_delivering_today"].get(order_id, 0)
+            arriving = ctx["packages_arriving_today"].get(order_id, 0)
+
+            if delivering > delivered:
+                status = "out_for_delivery"
+            elif arriving > delivered:
+                status = "arriving_today"
+            elif delivered:
+                status = "delivered"
+            else:
+                status = "shipped"
+
+            metadata = dict(ctx["order_details"].get(order_id, {}))
+            metadata["status"] = status
+            result[order_id] = metadata
+
+        return result
 
     async def _process_amazon_email(
         self,
@@ -203,6 +232,11 @@ class AmazonSearchMixin(AmazonImageMixin):
         parsed_arrival = None
         if body:
             parsed_arrival = await parse_amazon_arrival_date(self.hass, body, date)
+
+        if order_id and parsed_arrival:
+            ctx["order_details"].setdefault(order_id, {})["expected_delivery"] = (
+                parsed_arrival.isoformat()
+            )
 
         # OFD emails received today imply delivery today, even if the body
         # time-window parsing fails (e.g. "Zustellung heute 15:15 - 17:15").
