@@ -17,10 +17,12 @@ from custom_components.mail_and_packages.const import (
     AMAZON_HUB_CODE,
     AMAZON_ORDER,
     AMAZON_ORDER_DETAILS,
+    AMAZON_ORDERED_SUBJECT,
     AMAZON_OTP,
     AMAZON_OTP_CODE,
     AMAZON_PACKAGES,
     AMAZON_REGISTRY_ORDERS,
+    AMAZON_SHIPMENT_SUBJECT,
     ATTR_COUNT,
     CONF_FORWARDING_HEADER,
 )
@@ -1510,3 +1512,12 @@ async def test_amazon_packages_order_details(hass):
     assert registry_order["status"] == "shipped"
     assert registry_order["expected_delivery"] == "2026-07-20"
     assert registry_order["name"].startswith("OLSA Giant Tumble Tower")
+
+
+def test_amazon_subject_matching_itemized():
+    """Test that Amazon subject constants match itemized subject formats."""
+    shipped_subject = "Shipped 2 items: Photography Equipment, Household Supplies"
+    ordered_subject = "Ordered 1 item: Pantry Staples"
+
+    assert any(s.lower() in shipped_subject.lower() for s in AMAZON_SHIPMENT_SUBJECT)
+    assert any(s.lower() in ordered_subject.lower() for s in AMAZON_ORDERED_SUBJECT)

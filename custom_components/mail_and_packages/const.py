@@ -216,7 +216,7 @@ AMAZON_DELIVERING_SUBJECT = [
     "En cours de livraison",
 ]
 AMAZON_SHIPMENT_SUBJECT = [
-    "Shipped:",
+    "Shipped",
     "Enviado:",
     "Spedito:",
     "Versandt:",
@@ -225,7 +225,7 @@ AMAZON_SHIPMENT_SUBJECT = [
     *AMAZON_DELIVERING_SUBJECT,
 ]
 AMAZON_ORDERED_SUBJECT = [
-    "Ordered:",
+    "Ordered",
     "Pedido efetuado:",
     "Commandé",
 ]
