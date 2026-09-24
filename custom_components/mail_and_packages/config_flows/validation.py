@@ -231,9 +231,7 @@ async def _validate_forwarded_emails(user_input: dict, errors: dict) -> None:
 def _normalize_tracking_options(user_input: dict) -> None:
     """Normalize registry and tracking-forwarding options."""
     forward_enabled = bool(user_input.get(CONF_FORWARD_TO_SEVENTEENTRACK, False))
-    universal_scan_enabled = bool(
-        user_input.get(CONF_UNIVERSAL_TRACKING_SCAN, False)
-    )
+    universal_scan_enabled = bool(user_input.get(CONF_UNIVERSAL_TRACKING_SCAN, False))
 
     if forward_enabled or universal_scan_enabled:
         # Persistent state is required for forwarding idempotency and UID dedupe.
