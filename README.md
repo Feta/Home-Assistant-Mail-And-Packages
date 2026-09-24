@@ -43,7 +43,9 @@ See the [wiki](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wi
 
 ## Super Tracking Beta
 
-This fork contains an experimental, opt-in package tracking pipeline built on the current upstream `dev` codebase. It adds a persistent package registry, forwarding through Home Assistant's official 17TRACK integration, and a local universal tracking-number scanner.
+This fork contains an experimental, opt-in package tracking pipeline built on the current upstream `dev` codebase. It adds a persistent package registry, forwarding through Home Assistant's official 17TRACK integration, a local universal tracking-number scanner, 17TRACK status enrichment, and Amazon order/item metadata extracted from shipping email.
+
+The registry can now merge 17TRACK status, location, latest event text, timestamp, origin/destination, and package type back into package records. Amazon shipping mail can add order ID, item name, product image, expected-delivery date, and Amazon delivery state when an email can be correlated to a tracking number.
 
 The beta does not add cloud LLM email analysis, Amazon cookie scraping, or direct 17TRACK credentials. Gmail OAuth and the current upstream IMAP implementation remain intact.
 
