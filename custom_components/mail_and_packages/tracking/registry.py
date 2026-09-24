@@ -89,13 +89,16 @@ class PackageRegistry:
             current_rank = STATUS_RANK.get(existing.get("status", "detected"), 0)
             new_rank = STATUS_RANK[status]
             if new_rank <= current_rank:
+                changed = False
+                if carrier != "unknown" and existing.get("carrier", "unknown") == "unknown":
+                    existing["carrier"] = carrier
+                    changed = True
                 if source == "carrier_email" and not existing.get("carrier_confirmed"):
                     existing["carrier_confirmed"] = True
+                    changed = True
+                if changed:
                     existing["last_updated"] = now
-                    if carrier != "unknown":
-                        existing["carrier"] = carrier
-                    return True
-                return False
+                return changed
             existing["status"] = status
             existing["last_updated"] = now
             if carrier != "unknown":
@@ -181,6 +184,37 @@ class PackageRegistry:
             source="manual",
             description="Manually added",
         )
+
+    def is_uid_processed(self, uid: str) -> bool:
+        """Return whether the universal scanner already processed a message UID."""
+        return uid in self._processed_uids
+
+    def mark_uid_processed(self, uid: str) -> bool:
+        """Mark a message UID processed, returning whether state changed."""
+        if uid in self._processed_uids:
+            return False
+        self._processed_uids[uid] = datetime.now(UTC).isoformat()
+        return True
+
+    def expire_processed_uids(self, max_age_days: int = 7) -> int:
+        """Expire old processed UID markers and return the number removed."""
+        now = datetime.now(UTC)
+        removed = 0
+        for uid, date_str in list(self._processed_uids.items()):
+            try:
+                processed = datetime.fromisoformat(date_str)
+            except (TypeError, ValueError):
+                self._processed_uids.pop(uid, None)
+                removed += 1
+                continue
+
+            if processed.tzinfo is None:
+                processed = processed.replace(tzinfo=UTC)
+
+            if (now - processed).days > max_age_days:
+                self._processed_uids.pop(uid, None)
+                removed += 1
+        return removed
 
     def is_forwarded(
         self,
