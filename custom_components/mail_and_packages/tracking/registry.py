@@ -354,7 +354,9 @@ class PackageRegistry:
             "tracking_info_language": remote.get("tracking_info_language"),
             "synced_at": now,
         }
-        return {key: value for key, value in metadata.items() if value not in (None, "")}
+        return {
+            key: value for key, value in metadata.items() if value not in (None, "")
+        }
 
     def reconcile_tracking_provider_packages(
         self,
@@ -422,10 +424,8 @@ class PackageRegistry:
                 changed_count += 1
 
             previous_status = package.get("status", "detected")
-            if (
-                lifecycle
-                and STATUS_RANK.get(lifecycle, 0)
-                > STATUS_RANK.get(previous_status, 0)
+            if lifecycle and STATUS_RANK.get(lifecycle, 0) > STATUS_RANK.get(
+                previous_status, 0
             ):
                 package["status"] = lifecycle
                 package["last_updated"] = now
@@ -496,9 +496,7 @@ class PackageRegistry:
                 continue
 
             first_seen = (
-                existing.get("first_seen", now)
-                if isinstance(existing, dict)
-                else now
+                existing.get("first_seen", now) if isinstance(existing, dict) else now
             )
             self._merchant_orders[str(order_id)] = {
                 **incoming,
@@ -633,9 +631,8 @@ class PackageRegistry:
             order_age = (now - order_updated).days
             order_status = order.get("status", "shipped")
             if (
-                (order_status == "delivered" and order_age >= delivered_days)
-                or order_age >= detected_days
-            ):
+                order_status == "delivered" and order_age >= delivered_days
+            ) or order_age >= detected_days:
                 self._merchant_orders.pop(order_id, None)
                 removed += 1
 
