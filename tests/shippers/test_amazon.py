@@ -17,10 +17,10 @@ from custom_components.mail_and_packages.const import (
     AMAZON_HUB_CODE,
     AMAZON_ORDER,
     AMAZON_ORDER_DETAILS,
-    AMAZON_REGISTRY_ORDERS,
     AMAZON_OTP,
     AMAZON_OTP_CODE,
     AMAZON_PACKAGES,
+    AMAZON_REGISTRY_ORDERS,
     ATTR_COUNT,
     CONF_FORWARDING_HEADER,
 )
