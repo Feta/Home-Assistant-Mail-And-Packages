@@ -64,6 +64,25 @@ class PackageRegistry:
         """Remove registry storage for this config entry."""
         await self._store.async_remove()
 
+    @staticmethod
+    def _enrich_existing_package(
+        existing: dict[str, Any],
+        carrier: str,
+        source: str,
+        now: str,
+    ) -> bool:
+        """Enrich an existing record without changing its lifecycle state."""
+        changed = False
+        if carrier != "unknown" and existing.get("carrier", "unknown") == "unknown":
+            existing["carrier"] = carrier
+            changed = True
+        if source == "carrier_email" and not existing.get("carrier_confirmed"):
+            existing["carrier_confirmed"] = True
+            changed = True
+        if changed:
+            existing["last_updated"] = now
+        return changed
+
     def register_package(
         self,
         tracking_number: str,
@@ -89,16 +108,12 @@ class PackageRegistry:
             current_rank = STATUS_RANK.get(existing.get("status", "detected"), 0)
             new_rank = STATUS_RANK[status]
             if new_rank <= current_rank:
-                changed = False
-                if carrier != "unknown" and existing.get("carrier", "unknown") == "unknown":
-                    existing["carrier"] = carrier
-                    changed = True
-                if source == "carrier_email" and not existing.get("carrier_confirmed"):
-                    existing["carrier_confirmed"] = True
-                    changed = True
-                if changed:
-                    existing["last_updated"] = now
-                return changed
+                return self._enrich_existing_package(
+                    existing,
+                    carrier,
+                    source,
+                    now,
+                )
             existing["status"] = status
             existing["last_updated"] = now
             if carrier != "unknown":
