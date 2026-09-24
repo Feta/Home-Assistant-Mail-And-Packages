@@ -344,22 +344,15 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         ):
             return
 
-        try:
-            async with asyncio.timeout(DEFAULT_UNIVERSAL_SCAN_TIMEOUT):
-                scan_result = await async_scan_tracking_emails(
-                    account,
-                    cache,
-                    self.registry,
-                    since_date,
-                    max_messages=DEFAULT_UNIVERSAL_SCAN_MAX_MESSAGES,
-                    processed_uid_days=max(days + 2, 7),
-                )
-        except TimeoutError:
-            _LOGGER.warning(
-                "Universal tracking scan timed out; remaining messages will be "
-                "processed on a later scan"
-            )
-            return
+        scan_result = await async_scan_tracking_emails(
+            account,
+            cache,
+            self.registry,
+            since_date,
+            max_messages=DEFAULT_UNIVERSAL_SCAN_MAX_MESSAGES,
+            processed_uid_days=max(days + 2, 7),
+            timeout_seconds=DEFAULT_UNIVERSAL_SCAN_TIMEOUT,
+        )
 
         if scan_result.state_changed:
             data.update(self.registry.coordinator_data())
@@ -375,6 +368,13 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "Universal tracking scan skipped %s message(s) after fetch failures",
                 scan_result.fetch_failures,
+            )
+
+        if scan_result.timed_out:
+            _LOGGER.warning(
+                "Universal tracking scan timed out after processing %s message(s); "
+                "remaining messages will be processed on a later scan",
+                scan_result.scanned_messages,
             )
 
     async def _async_forward_registry_packages(self, data: dict) -> None:
