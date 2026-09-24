@@ -179,6 +179,39 @@ async def test_forwarding_state_is_account_scoped(registry):
 
 
 @pytest.mark.asyncio
+async def test_same_state_can_enrich_unknown_carrier(registry):
+    """A same-state discovery should fill an unknown carrier without downgrading."""
+    await registry.async_load()
+    registry.register_package("PKG1", "unknown", "detected", source="manual")
+
+    assert registry.register_package(
+        "PKG1",
+        "ups",
+        "detected",
+        source="universal_scan",
+    )
+    assert registry.packages["PKG1"]["carrier"] == "ups"
+    assert registry.packages["PKG1"]["status"] == "detected"
+
+
+@pytest.mark.asyncio
+async def test_processed_uid_lifecycle(registry):
+    """Processed UID markers should dedupe scans and expire cleanly."""
+    await registry.async_load()
+
+    assert registry.mark_uid_processed("Packages/123")
+    assert not registry.mark_uid_processed("Packages/123")
+    assert registry.is_uid_processed("Packages/123")
+
+    registry._processed_uids["Packages/123"] = (
+        datetime.now(UTC) - timedelta(days=9)
+    ).isoformat()
+
+    assert registry.expire_processed_uids(max_age_days=7) == 1
+    assert not registry.is_uid_processed("Packages/123")
+
+
+@pytest.mark.asyncio
 async def test_save_and_remove(registry, mock_store):
     """Registry should persist and remove its storage cleanly."""
     await registry.async_load()
