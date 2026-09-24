@@ -50,6 +50,7 @@ from custom_components.mail_and_packages.shippers import get_shipper_for_sensor
 from custom_components.mail_and_packages.tracking import (
     PackageRegistry,
     async_forward_pending_to_seventeentrack,
+    async_get_seventeentrack_snapshot,
     async_scan_tracking_emails,
 )
 from custom_components.mail_and_packages.utils.cache import EmailCache
@@ -271,11 +272,16 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 account, config, today, since_date, cache
             )
             tracking_details = shipper_data.pop("_tracking_details", {})
+            amazon_orders = shipper_data.pop(const.AMAZON_REGISTRY_ORDERS, {})
             data.update(shipper_data)
             self._dedupe_marketplace_duplicates(data, tracking_details)
             self._apply_tracking_state(data, tracking_details, today_iso)
             self._latch_mail_delivered(data, today_iso)
-            await self._update_package_registry(data, tracking_details)
+            await self._update_package_registry(
+                data,
+                tracking_details,
+                amazon_orders,
+            )
             await self._async_scan_universal_tracking(
                 account,
                 cache,
@@ -303,13 +309,15 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         self,
         data: dict,
         tracking_details: dict[str, list[str]],
+        amazon_orders: dict[str, dict] | None = None,
     ) -> None:
-        """Reconcile carrier tracking details into the persistent registry."""
+        """Reconcile carrier tracking and merchant metadata into the registry."""
         if self.registry is None:
             return
 
         await self.registry.async_load()
         transitions = self.registry.reconcile_tracking_details(tracking_details)
+        amazon_changes = self.registry.reconcile_amazon_orders(amazon_orders or {})
         expired = self.registry.auto_expire(
             delivered_days=self.config.get(
                 CONF_REGISTRY_DELIVERED_DAYS,
@@ -322,7 +330,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         )
         data.update(self.registry.coordinator_data())
 
-        if transitions or expired:
+        if transitions or amazon_changes or expired:
             await self.registry.async_save()
 
         for transition in transitions:
@@ -378,7 +386,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             )
 
     async def _async_forward_registry_packages(self, data: dict) -> None:
-        """Forward packages without coupling provider latency to the IMAP scan."""
+        """Synchronize and forward packages through Home Assistant 17TRACK."""
         if self.registry is None or not self.config.get(
             CONF_FORWARD_TO_SEVENTEENTRACK,
             DEFAULT_FORWARD_TO_SEVENTEENTRACK,
@@ -387,27 +395,50 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
 
         try:
             async with asyncio.timeout(30):
+                snapshot = await async_get_seventeentrack_snapshot(
+                    self.hass,
+                    self.config.get(CONF_SEVENTEENTRACK_CONFIG_ENTRY),
+                )
+                provider_changes = 0
+                provider_transitions: list[dict] = []
+                if snapshot.service_available and snapshot.config_entry_id:
+                    provider_changes, provider_transitions = (
+                        self.registry.reconcile_tracking_provider_packages(
+                            "seventeentrack",
+                            snapshot.config_entry_id,
+                            list(snapshot.packages),
+                        )
+                    )
+
                 forwarding_result = await async_forward_pending_to_seventeentrack(
                     self.hass,
                     self.registry,
                     self.config.get(CONF_SEVENTEENTRACK_CONFIG_ENTRY),
+                    snapshot=snapshot,
                 )
         except TimeoutError:
             _LOGGER.warning(
-                "17TRACK forwarding timed out; package handoff will be retried later"
+                "17TRACK synchronization timed out; registry enrichment and "
+                "package handoff will be retried later"
             )
             return
 
         forwarding_changes = (
             forwarding_result.forwarded + forwarding_result.existing_remote
         )
-        if forwarding_changes:
+        if provider_changes or forwarding_changes:
             data.update(self.registry.coordinator_data())
             await self.registry.async_save()
 
+        for transition in provider_transitions:
+            self.hass.bus.async_fire(
+                f"{const.DOMAIN}_package_{transition['status']}",
+                transition,
+            )
+
         if not forwarding_result.service_available:
             _LOGGER.debug(
-                "17TRACK forwarding is enabled but no usable 17TRACK service "
+                "17TRACK synchronization is enabled but no usable 17TRACK service "
                 "and config entry are currently available"
             )
         elif forwarding_result.failed:
