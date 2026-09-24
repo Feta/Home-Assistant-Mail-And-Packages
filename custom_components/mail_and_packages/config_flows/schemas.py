@@ -45,6 +45,7 @@ from custom_components.mail_and_packages.const import (
     CONF_REGISTRY_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_SEVENTEENTRACK_CONFIG_ENTRY,
+    CONF_UNIVERSAL_TRACKING_SCAN,
     CONF_UPS_CUSTOM_IMG,
     CONF_USPS_PLACEHOLDER,
     CONF_VERIFY_SSL,
@@ -53,6 +54,7 @@ from custom_components.mail_and_packages.const import (
     DEFAULT_EXCHANGE_MODE,
     DEFAULT_FORWARD_TO_SEVENTEENTRACK,
     DEFAULT_REGISTRY_ENABLED,
+    DEFAULT_UNIVERSAL_TRACKING_SCAN,
     DEFAULT_USPS_PLACEHOLDER,
     DEFAULT_VERIFY_SSL,
 )
@@ -269,6 +271,10 @@ def _build_step_2_schema(
                 (
                     CONF_FORWARD_TO_SEVENTEENTRACK,
                     DEFAULT_FORWARD_TO_SEVENTEENTRACK,
+                ),
+                (
+                    CONF_UNIVERSAL_TRACKING_SCAN,
+                    DEFAULT_UNIVERSAL_TRACKING_SCAN,
                 ),
                 (CONF_GENERATE_GRID, False),
                 (CONF_GENERATE_MP4, False),
