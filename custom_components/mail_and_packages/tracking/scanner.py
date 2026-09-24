@@ -203,7 +203,6 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
         return []
 
     search_text = f"{subject}\n{body}"
-    text_upper = search_text.upper()
     text_lower = search_text.lower()
     header_lower = f"{sender_domain} {subject}".lower()
 
@@ -211,7 +210,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
     seen: set[str] = set()
 
     for pattern in TRACKING_PATTERNS:
-        for match in pattern.regex.finditer(text_upper):
+        for match in pattern.regex.finditer(search_text):
             tracking = match.group(1).upper()
             if tracking in seen:
                 continue
