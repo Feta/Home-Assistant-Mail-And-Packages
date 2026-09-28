@@ -523,6 +523,23 @@ class PackageRegistry:
                 if field in allowed and value not in (None, "")
             }
             existing = self._merchant_orders.get(key)
+
+            # Older confirmation emails can be rescanned after an order has
+            # already advanced. Do not let "awaiting tracking" metadata from
+            # that older message downgrade a shipped/out-for-delivery/delivered
+            # order that already has carrier tracking attached.
+            if isinstance(existing, dict):
+                existing_status = str(existing.get("status") or "").lower()
+                incoming_status = str(incoming.get("status") or "").lower()
+                pending_statuses = {"", "ordered", "pending", "awaiting_tracking"}
+                advanced_statuses = {"shipped", "out_for_delivery", "delivered"}
+                if (
+                    existing.get("tracking_number")
+                    and existing_status in advanced_statuses
+                    and incoming_status in pending_statuses
+                ):
+                    incoming["status"] = existing.get("status")
+
             preserved = (
                 {
                     field: value
