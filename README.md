@@ -9,6 +9,8 @@
 
 ## About this fork
 
+**Current beta:** `0.8.0b2`
+
 The original **Mail and Packages** integration connects to your email account and creates Home Assistant sensors for mail and package activity. This fork preserves that functionality while adding an optional, persistent package-tracking pipeline designed to keep package history and tracking metadata useful beyond a single day's email scan.
 
 ### What this fork adds
@@ -80,6 +82,34 @@ The integration domain remains `mail_and_packages`, so this fork replaces the co
 ### Manual install
 
 Copy `custom_components/mail_and_packages` into your Home Assistant `custom_components` directory and restart Home Assistant.
+
+## Manual tracking and pending orders
+
+The persistent registry can also manage packages that cannot be discovered automatically.
+
+To add a standalone carrier tracking number:
+
+```yaml
+action: mail_and_packages.add_package
+data:
+  tracking_number: "123456789012"
+  carrier: fedex
+```
+
+When the integration has already identified a pending merchant order, attach the carrier number to that existing order instead of creating a disconnected package:
+
+```yaml
+action: mail_and_packages.attach_tracking
+data:
+  merchant: Walmart
+  order_id: "2000153-93327828"
+  tracking_number: "123456789012"
+  carrier: fedex
+```
+
+The attached package inherits the merchant/order metadata and can then be forwarded to 17TRACK automatically when that option is enabled.
+
+Other registry services include `mail_and_packages.mark_delivered`, `mail_and_packages.clear_package`, and `mail_and_packages.clear_all_delivered`.
 
 ## Want the original upstream project?
 
