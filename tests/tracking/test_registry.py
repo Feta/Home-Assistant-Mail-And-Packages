@@ -275,6 +275,53 @@ async def test_pending_orders_exclude_shipped_orders(registry):
 
 
 @pytest.mark.asyncio
+async def test_merchant_rescan_does_not_downgrade_attached_order(registry):
+    """A rescanned confirmation email must not downgrade an attached shipment."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "awaiting_tracking",
+                "expected_delivery": "2026-10-01",
+                "item_count": 1,
+                "description": "1 item",
+            }
+        },
+    )
+    registry.attach_tracking_to_order(
+        "Walmart",
+        "2000153-93327828",
+        "877829797830",
+        "fedex",
+    )
+
+    assert registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "awaiting_tracking",
+                "expected_delivery": "2026-10-01",
+                "item_count": 2,
+                "description": "2 items",
+            }
+        },
+    )
+
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "shipped"
+    assert order["tracking_number"] == "877829797830"
+    assert order["carrier"] == "fedex"
+    assert order["item_count"] == 2
+    assert order["description"] == "2 items"
+
+    package = registry.packages["877829797830"]
+    assert package["merchant"]["status"] == "shipped"
+    assert package["merchant"]["item_count"] == 2
+    assert package["merchant"]["description"] == "2 items"
+
+
+@pytest.mark.asyncio
 async def test_generic_merchant_order_can_attach_tracking(registry):
     """A pending Walmart order should accept manually retrieved carrier tracking."""
     await registry.async_load()

@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
-SCANNER_UID_VERSION = 4
+SCANNER_UID_VERSION = 5
 AMAZON_ORDER_PATTERN = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 WALMART_ORDER_PATTERN = re.compile(r"\b#?(\d{7}-\d{7,8})\b")
 WALMART_ARRIVES_PATTERN = re.compile(
@@ -324,6 +324,26 @@ def extract_merchant_orders(raw_message: bytes) -> list[dict[str, Any]]:
     return [walmart] if walmart else []
 
 
+def _has_disqualifying_numeric_label(
+    text_lower: str,
+    start: int,
+    pattern: TrackingPattern,
+) -> bool:
+    """Reject labeled non-tracking IDs that resemble numeric carrier numbers."""
+    if pattern.carrier != "fedex":
+        return False
+
+    lookback = text_lower[max(0, start - 120) : start].rstrip()
+    return bool(
+        re.search(
+            r"(?:purchase\s+order(?:\s+number)?|invoice(?:\s+number)?|"
+            r"reference|customer(?:\s+number)?|account(?:\s+number)?)"
+            r"\s*[:#-]?\s*$",
+            lookback,
+        )
+    )
+
+
 def _has_context(
     text_lower: str,
     header_lower: str,
@@ -382,6 +402,12 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
         for match in pattern.regex.finditer(search_text):
             tracking = match.group(1).upper()
             if tracking in seen:
+                continue
+            if _has_disqualifying_numeric_label(
+                text_lower,
+                match.start(1),
+                pattern,
+            ):
                 continue
             if pattern.requires_context and not _has_context(
                 text_lower,
