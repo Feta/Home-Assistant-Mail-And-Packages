@@ -55,3 +55,33 @@ add_package:
       default: unknown
       selector:
         text:
+
+attach_tracking:
+  name: Attach Tracking to Order
+  description: Attach a manually retrieved carrier tracking number to a known merchant order.
+  fields:
+    merchant:
+      name: Merchant
+      description: Merchant name shown on the pending order, such as Walmart.
+      required: true
+      selector:
+        text:
+    order_id:
+      name: Order ID
+      description: Merchant order number to attach the tracking number to.
+      required: true
+      selector:
+        text:
+    tracking_number:
+      name: Tracking Number
+      description: Carrier tracking number retrieved from the merchant.
+      required: true
+      selector:
+        text:
+    carrier:
+      name: Carrier
+      description: Carrier name such as fedex, ups, or usps.
+      required: false
+      default: unknown
+      selector:
+        text:
