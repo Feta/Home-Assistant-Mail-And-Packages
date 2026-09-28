@@ -284,6 +284,35 @@ async def test_generic_merchant_order_can_attach_tracking(registry):
 
 
 @pytest.mark.asyncio
+async def test_pending_orders_excludes_shipped_orders_without_tracking(registry):
+    """Shipped merchant records should not be presented as awaiting tracking."""
+    await registry.async_load()
+    assert registry.reconcile_merchant_orders(
+        "Amazon",
+        {
+            "111-1111111-1111111": {
+                "status": "shipped",
+                "expected_delivery": "2026-11-03",
+            }
+        },
+    )
+    assert registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "awaiting_tracking",
+                "expected_delivery": "2026-10-01",
+            }
+        },
+    )
+
+    pending = registry.get_pending_orders_list()
+
+    assert [order["merchant"] for order in pending] == ["Walmart"]
+    assert pending[0]["order_id"] == "2000153-93327828"
+
+
+@pytest.mark.asyncio
 async def test_attach_tracking_requires_existing_order(registry):
     """Manual order attachment should not invent an unknown merchant order."""
     await registry.async_load()
