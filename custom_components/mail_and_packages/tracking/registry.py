@@ -74,6 +74,18 @@ class PackageRegistry:
         age_hours = (now - first_seen).total_seconds() / 3600
         return age_hours >= PROVIDER_NOT_FOUND_GRACE_HOURS
 
+    @classmethod
+    def _provider_status_is_exception(
+        cls,
+        status_key: str,
+        package: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        """Return whether a provider status should surface as an exception."""
+        if status_key == "not_found":
+            return cls._not_found_is_exception(package, now)
+        return status_key in PROVIDER_EXCEPTION_STATUSES
+
     @property
     def packages(self) -> dict[str, dict[str, Any]]:
         """Return all package records, including cleared records."""
@@ -462,9 +474,11 @@ class PackageRegistry:
                     }
                 )
 
-            provider_exception = status_key in PROVIDER_EXCEPTION_STATUSES
-            if status_key == "not_found":
-                provider_exception = self._not_found_is_exception(package, now_dt)
+            provider_exception = self._provider_status_is_exception(
+                status_key,
+                package,
+                now_dt,
+            )
             if package.get("provider_exception", False) != provider_exception:
                 package["provider_exception"] = provider_exception
                 package["last_updated"] = now
@@ -552,10 +566,7 @@ class PackageRegistry:
                 continue
             order_id = str(package_merchant.get("order_id") or "")
             package_merchant_name = str(package_merchant.get("merchant") or "")
-            if (
-                not order_id
-                or package_merchant_name.lower() != merchant_name.lower()
-            ):
+            if not order_id or package_merchant_name.lower() != merchant_name.lower():
                 continue
             key = self._merchant_order_key(merchant_name, order_id)
             order = self._merchant_orders.get(key)
