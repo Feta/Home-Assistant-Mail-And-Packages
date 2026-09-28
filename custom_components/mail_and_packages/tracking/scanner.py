@@ -210,42 +210,50 @@ def _amazon_merchant_metadata(
     return metadata
 
 
+def _message_datetime(message: Any) -> datetime:
+    """Return the message timestamp or current UTC time when unavailable."""
+    try:
+        sent = parsedate_to_datetime(str(message.get("Date", "") or ""))
+    except (TypeError, ValueError, OverflowError):
+        sent = None
+    if sent is None:
+        return datetime.now(UTC)
+    if sent.tzinfo is None:
+        return sent.replace(tzinfo=UTC)
+    return sent
+
+
+def _month_number(month_text: str) -> int | None:
+    """Parse an abbreviated or full English month name."""
+    for fmt in ("%b", "%B"):
+        try:
+            return datetime.strptime(month_text, fmt).month
+        except ValueError:
+            continue
+    return None
+
+
 def _walmart_expected_delivery(message: Any, body: str) -> str | None:
     """Extract Walmart's human-readable arrival date as an ISO date."""
     match = WALMART_ARRIVES_PATTERN.search(body)
     if not match:
         return None
 
-    try:
-        sent = parsedate_to_datetime(str(message.get("Date", "") or ""))
-    except (TypeError, ValueError, OverflowError):
-        sent = None
-    if sent is None:
-        sent = datetime.now(UTC)
-    elif sent.tzinfo is None:
-        sent = sent.replace(tzinfo=UTC)
-
+    sent = _message_datetime(message)
     month_text, day_text = match.groups()
-    month = None
-    for fmt in ("%b", "%B"):
-        try:
-            month = datetime.strptime(month_text, fmt).month
-            break
-        except ValueError:
-            continue
+    month = _month_number(month_text)
     if month is None:
         return None
 
-    year = sent.year
     try:
-        candidate = datetime(year, month, int(day_text), tzinfo=UTC)
+        candidate = datetime(sent.year, month, int(day_text), tzinfo=UTC)
     except ValueError:
         return None
 
     # Handle December order emails with a January delivery estimate.
     if (sent - candidate).days > 180:
         try:
-            candidate = candidate.replace(year=year + 1)
+            candidate = candidate.replace(year=sent.year + 1)
         except ValueError:
             return None
     return candidate.date().isoformat()
@@ -258,10 +266,7 @@ def _walmart_merchant_metadata(
     sender_domain: str,
 ) -> dict[str, Any] | None:
     """Extract a Walmart order record without following authenticated links."""
-    if not (
-        sender_domain == "walmart.com"
-        or sender_domain.endswith(".walmart.com")
-    ):
+    if not (sender_domain == "walmart.com" or sender_domain.endswith(".walmart.com")):
         return None
 
     combined = f"{subject}\n{body}"
