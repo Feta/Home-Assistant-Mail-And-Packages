@@ -2,6 +2,13 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b4 - 2026-09-28
+
+### Fixes
+
+- Preserve shipped/out-for-delivery/delivered merchant-order status when an older confirmation email is rescanned.
+- Force a one-time recent-mail rescan so corrected Walmart item counts can update already-attached orders without losing carrier/tracking metadata.
+
 ## 0.8.0b3 - 2026-09-28
 
 ### Fixes
