@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
-SCANNER_UID_VERSION = 3
+SCANNER_UID_VERSION = 4
 AMAZON_ORDER_PATTERN = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 WALMART_ORDER_PATTERN = re.compile(r"\b#?(\d{7}-\d{7,8})\b")
 WALMART_ARRIVES_PATTERN = re.compile(
