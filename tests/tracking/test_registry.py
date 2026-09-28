@@ -264,7 +264,7 @@ async def test_generic_merchant_order_can_attach_tracking(registry):
     assert order["status"] == "shipped"
 
     data = registry.coordinator_data()
-    assert data["registry_pending_orders_list"][0]["merchant"] == "Walmart"
+    assert data["registry_pending_orders_list"] == []
 
 
 @pytest.mark.asyncio
