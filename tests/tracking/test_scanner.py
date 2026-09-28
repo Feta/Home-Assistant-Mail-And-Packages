@@ -101,6 +101,7 @@ def test_extracts_walmart_pending_order_metadata():
         b"Content-Type: text/plain; charset=utf-8\r\n"
         b"\r\n"
         b"Order number: #2000153-93327828\r\n"
+        b"We're on it! Aeon Flux (Steelbook)... + 1 item\r\n"
         b"We'll let you know when it's on the way.\r\n"
         b"Arrives Thu, Oct 1\r\n"
         b"2 items\r\n"
