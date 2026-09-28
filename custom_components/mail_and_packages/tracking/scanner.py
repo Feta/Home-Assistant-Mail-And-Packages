@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
-SCANNER_UID_VERSION = 3
+SCANNER_UID_VERSION = 4
 AMAZON_ORDER_PATTERN = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 WALMART_ORDER_PATTERN = re.compile(r"\b#?(\d{7}-\d{7,8})\b")
 WALMART_ARRIVES_PATTERN = re.compile(
@@ -294,8 +294,13 @@ def _walmart_merchant_metadata(
     }
     if expected := _walmart_expected_delivery(message, body):
         metadata["expected_delivery"] = expected
-    if item_match := WALMART_ITEM_COUNT_PATTERN.search(combined):
-        item_count = int(item_match.group(1))
+    item_counts = [
+        int(match.group(1)) for match in WALMART_ITEM_COUNT_PATTERN.finditer(combined)
+    ]
+    if item_counts:
+        # Walmart multipart mail can repeat per-product "1 item" text before
+        # the order-level summary. The largest count is the best order total.
+        item_count = max(item_counts)
         metadata["item_count"] = item_count
         metadata["description"] = (
             f"{item_count} item" if item_count == 1 else f"{item_count} items"

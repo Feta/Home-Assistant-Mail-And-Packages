@@ -2,6 +2,13 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b3 - 2026-09-28
+
+### Fixes
+
+- Fixed Walmart item counts when multipart order emails repeat per-item text before the order summary.
+- Fixed `pending_orders` so shipped merchant orders without a linked tracking number are not misclassified as still awaiting tracking.
+
 ## 0.8.0b2 - 2026-09-28
 
 ### Super Tracking
