@@ -95,16 +95,16 @@ def test_amazon_tracking_carries_order_and_item_metadata():
 def test_extracts_walmart_pending_order_metadata():
     """Walmart confirmation email should create a pending order before tracking exists."""
     raw = (
-        "From: Walmart.com <help@walmart.com>\r\n"
-        "Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
-        "Subject: Thanks for your delivery order, Konstantinos\r\n"
-        "Content-Type: text/plain; charset=utf-8\r\n"
-        "\r\n"
-        "Order number: #2000153-93327828\r\n"
-        "We'll let you know when it's on the way.\r\n"
-        "Arrives Thu, Oct 1\r\n"
-        "2 items\r\n"
-    ).encode()
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
+        b"Subject: Thanks for your delivery order, Konstantinos\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: #2000153-93327828\r\n"
+        b"We'll let you know when it's on the way.\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"2 items\r\n"
+    )
 
     orders = extract_merchant_orders(raw)
 
@@ -243,16 +243,16 @@ async def test_scan_links_amazon_metadata_to_registered_package(registry, accoun
 async def test_scan_persists_walmart_order_without_tracking(registry, account):
     """Universal scan should persist Walmart orders even before carrier tracking exists."""
     raw = (
-        "From: Walmart.com <help@walmart.com>\r\n"
-        "Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
-        "Subject: Thanks for your delivery order, Konstantinos\r\n"
-        "Content-Type: text/plain; charset=utf-8\r\n"
-        "\r\n"
-        "Order number: #2000153-93327828\r\n"
-        "We'll let you know when it's on the way.\r\n"
-        "Arrives Thu, Oct 1\r\n"
-        "2 items\r\n"
-    ).encode()
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
+        b"Subject: Thanks for your delivery order, Konstantinos\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: #2000153-93327828\r\n"
+        b"We'll let you know when it's on the way.\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"2 items\r\n"
+    )
     cache = MagicMock()
     cache.fetch = AsyncMock(return_value=("OK", [raw]))
 
