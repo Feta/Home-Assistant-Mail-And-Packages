@@ -295,8 +295,7 @@ def _walmart_merchant_metadata(
     if expected := _walmart_expected_delivery(message, body):
         metadata["expected_delivery"] = expected
     item_counts = [
-        int(match.group(1))
-        for match in WALMART_ITEM_COUNT_PATTERN.finditer(combined)
+        int(match.group(1)) for match in WALMART_ITEM_COUNT_PATTERN.finditer(combined)
     ]
     if item_counts:
         # Walmart multipart mail can repeat per-product "1 item" text before
