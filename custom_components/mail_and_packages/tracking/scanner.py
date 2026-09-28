@@ -333,20 +333,15 @@ def _has_disqualifying_numeric_label(
     if pattern.carrier != "fedex":
         return False
 
-    line_start = max(
-        text_lower.rfind("\n", 0, start),
-        text_lower.rfind("\r", 0, start),
-    )
-    prefix = text_lower[line_start + 1 : start].strip()
+    lookback = text_lower[max(0, start - 120) : start].rstrip()
     return bool(
         re.search(
             r"(?:purchase\s+order(?:\s+number)?|invoice(?:\s+number)?|"
             r"reference|customer(?:\s+number)?|account(?:\s+number)?)"
             r"\s*[:#-]?\s*$",
-            prefix,
+            lookback,
         )
     )
-
 
 def _has_context(
     text_lower: str,
