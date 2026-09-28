@@ -756,13 +756,21 @@ class PackageRegistry:
         )
 
     def get_pending_orders_list(self) -> list[dict[str, Any]]:
-        """Return orders that have not reached a terminal state."""
-        terminal = {"delivered", "cancelled", "canceled", "cleared"}
+        """Return orders that are specifically waiting for carrier tracking."""
+        pending_statuses = {
+            "",
+            "ordered",
+            "pending",
+            "processing",
+            "preparing",
+            "preparing_shipment",
+            "awaiting_tracking",
+        }
         return [
             order
             for order in self.get_merchant_orders_list()
             if not order.get("tracking_number")
-            and str(order.get("status") or "").lower() not in terminal
+            and str(order.get("status") or "").strip().lower() in pending_statuses
         ]
 
     def get_amazon_orders_list(self) -> list[dict[str, Any]]:

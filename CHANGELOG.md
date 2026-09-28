@@ -2,6 +2,13 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b3 - 2026-09-28
+
+### Merchant orders
+
+- Fixed Walmart item counts when hidden email preview text or per-item image alt text contains smaller `1 item` values before the visible order total.
+- Restricted `pending_orders` to orders that are actually waiting for tracking, so already-shipped Amazon records no longer appear as pending.
+
 ## 0.8.0b2 - 2026-09-28
 
 ### Super Tracking
