@@ -155,6 +155,27 @@ def test_fedex_numeric_requires_shipping_context():
     assert not candidates
 
 
+def test_fedex_email_ignores_purchase_order_number():
+    """FedEx mail should ignore purchase-order IDs that resemble tracking."""
+    candidates = extract_tracking_candidates(
+        _message(
+            "Tracking details\n"
+            "Tracking ID\n"
+            "540576743144\n"
+            "Service\n"
+            "FedEx Home Delivery\n"
+            "Purchase order number\n"
+            "129126934254193\n",
+            subject="Your shipment is on the way 540576743144",
+            sender="TrackingUpdates@fedex.com",
+        )
+    )
+
+    assert [(item.carrier, item.tracking_number) for item in candidates] == [
+        ("fedex", "540576743144")
+    ]
+
+
 def test_fedex_numeric_accepted_with_carrier_context():
     """FedEx numeric tracking should be accepted when carrier context is present."""
     candidates = extract_tracking_candidates(
