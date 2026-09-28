@@ -343,6 +343,7 @@ def _has_disqualifying_numeric_label(
         )
     )
 
+
 def _has_context(
     text_lower: str,
     header_lower: str,
