@@ -229,6 +229,43 @@ async def _handle_add_package(
             )
 
 
+async def _handle_attach_tracking(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> None:
+    """Attach a manually retrieved tracking number to a known merchant order."""
+    merchant = call.data["merchant"]
+    order_id = call.data["order_id"]
+    tracking = call.data["tracking_number"]
+    carrier = call.data.get("carrier", "unknown")
+
+    for coordinator in _registry_coordinators(hass):
+        registry = coordinator.registry
+        normalized = registry.normalize_tracking_number(tracking)
+        if not registry.attach_tracking_to_order(
+            merchant,
+            order_id,
+            normalized,
+            carrier,
+        ):
+            continue
+
+        await _async_publish_registry(coordinator)
+        hass.bus.async_fire(
+            f"{DOMAIN}_package_detected",
+            {
+                "tracking_number": normalized,
+                "carrier": carrier.lower(),
+                "status": "detected",
+                "previous_status": None,
+                "source": "manual_order_link",
+                "merchant": merchant,
+                "order_id": order_id,
+            },
+        )
+        hass.async_create_task(coordinator.async_request_refresh())
+
+
 def _register_registry_services(hass: HomeAssistant) -> None:
     """Register package-registry management services once."""
     if hass.services.has_service(DOMAIN, "clear_package"):
@@ -237,6 +274,14 @@ def _register_registry_services(hass: HomeAssistant) -> None:
     tracking_schema = vol.Schema({vol.Required("tracking_number"): cv.string})
     add_schema = vol.Schema(
         {
+            vol.Required("tracking_number"): cv.string,
+            vol.Optional("carrier", default="unknown"): cv.string,
+        }
+    )
+    attach_schema = vol.Schema(
+        {
+            vol.Required("merchant"): cv.string,
+            vol.Required("order_id"): cv.string,
             vol.Required("tracking_number"): cv.string,
             vol.Optional("carrier", default="unknown"): cv.string,
         }
@@ -264,6 +309,12 @@ def _register_registry_services(hass: HomeAssistant) -> None:
         "add_package",
         partial(_handle_add_package, hass),
         schema=add_schema,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "attach_tracking",
+        partial(_handle_attach_tracking, hass),
+        schema=attach_schema,
     )
 
 
