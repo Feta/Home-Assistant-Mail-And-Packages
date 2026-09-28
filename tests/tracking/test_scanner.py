@@ -121,6 +121,28 @@ def test_extracts_walmart_pending_order_metadata():
     ]
 
 
+def test_walmart_item_count_prefers_order_summary():
+    """Multipart Walmart text should prefer the order-level item count."""
+    raw = (
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
+        b"Subject: Thanks for your delivery order, Konstantinos\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: #2000153-93327828\r\n"
+        b"1 item\r\n"
+        b"Another product 1 item\r\n"
+        b"What to expect\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"2 items See all\r\n"
+    )
+
+    orders = extract_merchant_orders(raw)
+
+    assert orders[0]["item_count"] == 2
+    assert orders[0]["description"] == "2 items"
+
+
 def test_fedex_numeric_requires_shipping_context():
     """Ambiguous numeric strings should not be accepted without carrier context."""
     candidates = extract_tracking_candidates(
