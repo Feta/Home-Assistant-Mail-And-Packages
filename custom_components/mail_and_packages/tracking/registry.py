@@ -770,8 +770,7 @@ class PackageRegistry:
             order
             for order in self.get_merchant_orders_list()
             if not order.get("tracking_number")
-            and str(order.get("status") or "").strip().lower()
-            in pending_statuses
+            and str(order.get("status") or "").strip().lower() in pending_statuses
         ]
 
     def get_amazon_orders_list(self) -> list[dict[str, Any]]:
