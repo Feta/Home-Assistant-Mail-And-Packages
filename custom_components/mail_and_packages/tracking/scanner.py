@@ -324,6 +324,30 @@ def extract_merchant_orders(raw_message: bytes) -> list[dict[str, Any]]:
     return [walmart] if walmart else []
 
 
+def _has_disqualifying_numeric_label(
+    text_lower: str,
+    start: int,
+    pattern: TrackingPattern,
+) -> bool:
+    """Reject labeled non-tracking IDs that resemble numeric carrier numbers."""
+    if pattern.carrier != "fedex":
+        return False
+
+    line_start = max(
+        text_lower.rfind("\n", 0, start),
+        text_lower.rfind("\r", 0, start),
+    )
+    prefix = text_lower[line_start + 1 : start].strip()
+    return bool(
+        re.search(
+            r"(?:purchase\s+order(?:\s+number)?|invoice(?:\s+number)?|"
+            r"reference|customer(?:\s+number)?|account(?:\s+number)?)"
+            r"\s*[:#-]?\s*$",
+            prefix,
+        )
+    )
+
+
 def _has_context(
     text_lower: str,
     header_lower: str,
@@ -382,6 +406,12 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
         for match in pattern.regex.finditer(search_text):
             tracking = match.group(1).upper()
             if tracking in seen:
+                continue
+            if _has_disqualifying_numeric_label(
+                text_lower,
+                match.start(1),
+                pattern,
+            ):
                 continue
             if pattern.requires_context and not _has_context(
                 text_lower,
