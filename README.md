@@ -19,6 +19,8 @@ The original **Mail and Packages** integration connects to your email account an
 - 17TRACK enrichment for status, location, latest event text, timestamps, origin/destination, and package type
 - Amazon order and item metadata enrichment when shipping email can be correlated to a tracking number
 - Amazon expected-delivery and delivery-state metadata
+- Walmart pending-order discovery before carrier tracking is available
+- Manual tracking attachment for linking a retrieved carrier number back to a known merchant order
 - Support for newer Amazon itemized subjects such as `Shipped 2 items: ...` and `Ordered 1 item: ...`
 - Manual package lifecycle support for packages that cannot be discovered automatically
 - No direct 17TRACK credentials stored by Mail and Packages; the fork uses Home Assistant's configured 17TRACK integration
