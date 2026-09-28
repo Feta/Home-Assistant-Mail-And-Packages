@@ -225,6 +225,14 @@ class RegistrySensor(PackagesSensor):
 
         attributes = {"packages": data.get(attr_key, [])}
         if self.type == "registry_tracked":
+            attributes["merchant_orders"] = data.get(
+                "registry_merchant_orders_list",
+                [],
+            )
+            attributes["pending_orders"] = data.get(
+                "registry_pending_orders_list",
+                [],
+            )
             attributes["amazon_orders"] = data.get(
                 "registry_amazon_orders_list",
                 [],

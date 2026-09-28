@@ -8,6 +8,7 @@ import pytest
 from custom_components.mail_and_packages.tracking.registry import PackageRegistry
 from custom_components.mail_and_packages.tracking.scanner import (
     async_scan_tracking_emails,
+    extract_merchant_orders,
     extract_tracking_candidates,
 )
 
@@ -91,6 +92,35 @@ def test_amazon_tracking_carries_order_and_item_metadata():
     }
 
 
+def test_extracts_walmart_pending_order_metadata():
+    """Walmart confirmation email should create a pending order before tracking exists."""
+    raw = (
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
+        b"Subject: Thanks for your delivery order, Konstantinos\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: #2000153-93327828\r\n"
+        b"We'll let you know when it's on the way.\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"2 items\r\n"
+    )
+
+    orders = extract_merchant_orders(raw)
+
+    assert orders == [
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "status": "awaiting_tracking",
+            "source_domain": "walmart.com",
+            "expected_delivery": "2026-10-01",
+            "item_count": 2,
+            "description": "2 items",
+        }
+    ]
+
+
 def test_fedex_numeric_requires_shipping_context():
     """Ambiguous numeric strings should not be accepted without carrier context."""
     candidates = extract_tracking_candidates(
@@ -167,7 +197,7 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     assert result.state_changed
     assert registry.packages["1Z999AA10123456784"]["source"] == "universal_scan"
     assert registry.packages["1Z999AA10123456784"]["source_from"] == "example.com"
-    assert registry.is_uid_processed("v2:Packages/123")
+    assert registry.is_uid_processed("v3:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -210,9 +240,48 @@ async def test_scan_links_amazon_metadata_to_registered_package(registry, accoun
 
 
 @pytest.mark.asyncio
+async def test_scan_persists_walmart_order_without_tracking(registry, account):
+    """Universal scan should persist Walmart orders even before carrier tracking exists."""
+    raw = (
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Fri, 25 Sep 2026 13:04:31 -0400\r\n"
+        b"Subject: Thanks for your delivery order, Konstantinos\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: #2000153-93327828\r\n"
+        b"We'll let you know when it's on the way.\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"2 items\r\n"
+    )
+    cache = MagicMock()
+    cache.fetch = AsyncMock(return_value=("OK", [raw]))
+
+    with patch(
+        "custom_components.mail_and_packages.tracking.scanner._execute_single_search",
+        AsyncMock(return_value=[b"789"]),
+    ):
+        result = await async_scan_tracking_emails(
+            account,
+            cache,
+            registry,
+            "20-Sep-2026",
+            max_messages=75,
+            processed_uid_days=7,
+        )
+
+    assert result.state_changed
+    assert registry.packages == {}
+    orders = registry.get_merchant_orders_list("Walmart")
+    assert len(orders) == 1
+    assert orders[0]["order_id"] == "2000153-93327828"
+    assert orders[0]["status"] == "awaiting_tracking"
+    assert registry.is_uid_processed("v3:Packages/789")
+
+
+@pytest.mark.asyncio
 async def test_scan_skips_previously_processed_uid(registry, account):
     """Previously processed messages should not be fetched again."""
-    registry.mark_uid_processed("v2:Packages/123")
+    registry.mark_uid_processed("v3:Packages/123")
     cache = MagicMock()
     cache.fetch = AsyncMock()
 
@@ -253,7 +322,7 @@ async def test_scan_retries_fetch_failure(registry, account):
         )
 
     assert result.fetch_failures == 1
-    assert not registry.is_uid_processed("v2:Packages/123")
+    assert not registry.is_uid_processed("v3:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -276,10 +345,10 @@ async def test_scan_processes_newest_messages_in_bounded_batches(registry, accou
         )
 
     assert result.scanned_messages == 2
-    assert not registry.is_uid_processed("v2:Packages/1")
-    assert not registry.is_uid_processed("v2:Packages/2")
-    assert registry.is_uid_processed("v2:Packages/3")
-    assert registry.is_uid_processed("v2:Packages/4")
+    assert not registry.is_uid_processed("v3:Packages/1")
+    assert not registry.is_uid_processed("v3:Packages/2")
+    assert registry.is_uid_processed("v3:Packages/3")
+    assert registry.is_uid_processed("v3:Packages/4")
 
 
 @pytest.mark.asyncio
@@ -311,8 +380,8 @@ async def test_scan_timeout_preserves_partial_progress(registry, account):
 
     assert result.timed_out
     assert result.scanned_messages == 1
-    assert registry.is_uid_processed("v2:Packages/1")
-    assert not registry.is_uid_processed("v2:Packages/2")
+    assert registry.is_uid_processed("v3:Packages/1")
+    assert not registry.is_uid_processed("v3:Packages/2")
     assert "1Z999AA10123456784" in registry.packages
     assert "TBA123456789012" not in registry.packages
 
@@ -342,4 +411,4 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
 
     assert not result.detected
     assert registry.packages["1Z999AA10123456784"]["status"] == "cleared"
-    assert registry.is_uid_processed("v2:Packages/123")
+    assert registry.is_uid_processed("v3:Packages/123")

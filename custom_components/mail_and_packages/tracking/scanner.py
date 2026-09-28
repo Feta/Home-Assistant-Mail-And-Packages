@@ -11,9 +11,10 @@ import html
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any
 
 from aioimaplib import IMAP4_SSL
@@ -30,8 +31,15 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_EMAIL_TEXT_CHARS = 250_000
 TRACKING_CONTEXT_WINDOW = 180
-SCANNER_UID_VERSION = 2
+SCANNER_UID_VERSION = 3
 AMAZON_ORDER_PATTERN = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
+WALMART_ORDER_PATTERN = re.compile(r"\b#?(\d{7}-\d{7,8})\b")
+WALMART_ARRIVES_PATTERN = re.compile(
+    r"\bArrives\s+(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?"
+    r"([A-Za-z]{3,9})\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
+WALMART_ITEM_COUNT_PATTERN = re.compile(r"\b(\d+)\s+items?\b", re.IGNORECASE)
 
 TRACKING_CONTEXT_KEYWORDS = (
     "tracking",
@@ -202,6 +210,115 @@ def _amazon_merchant_metadata(
     return metadata
 
 
+def _message_datetime(message: Any) -> datetime:
+    """Return the message timestamp or current UTC time when unavailable."""
+    try:
+        sent = parsedate_to_datetime(str(message.get("Date", "") or ""))
+    except (TypeError, ValueError, OverflowError):
+        sent = None
+    if sent is None:
+        return datetime.now(UTC)
+    if sent.tzinfo is None:
+        return sent.replace(tzinfo=UTC)
+    return sent
+
+
+def _month_number(month_text: str) -> int | None:
+    """Parse an abbreviated or full English month name."""
+    for fmt in ("%b", "%B"):
+        try:
+            return datetime.strptime(month_text, fmt).month
+        except ValueError:
+            continue
+    return None
+
+
+def _walmart_expected_delivery(message: Any, body: str) -> str | None:
+    """Extract Walmart's human-readable arrival date as an ISO date."""
+    match = WALMART_ARRIVES_PATTERN.search(body)
+    if not match:
+        return None
+
+    sent = _message_datetime(message)
+    month_text, day_text = match.groups()
+    month = _month_number(month_text)
+    if month is None:
+        return None
+
+    try:
+        candidate = datetime(sent.year, month, int(day_text), tzinfo=UTC)
+    except ValueError:
+        return None
+
+    # Handle December order emails with a January delivery estimate.
+    if (sent - candidate).days > 180:
+        try:
+            candidate = candidate.replace(year=sent.year + 1)
+        except ValueError:
+            return None
+    return candidate.date().isoformat()
+
+
+def _walmart_merchant_metadata(
+    message: Any,
+    subject: str,
+    body: str,
+    sender_domain: str,
+) -> dict[str, Any] | None:
+    """Extract a Walmart order record without following authenticated links."""
+    if not (sender_domain == "walmart.com" or sender_domain.endswith(".walmart.com")):
+        return None
+
+    combined = f"{subject}\n{body}"
+    order_match = WALMART_ORDER_PATTERN.search(combined)
+    if not order_match:
+        return None
+
+    lower = combined.lower()
+    if "delivered" in lower or "arrived:" in lower:
+        status = "delivered"
+    elif "out for delivery" in lower:
+        status = "out_for_delivery"
+    elif "let you know when" in lower and "on the way" in lower:
+        status = "awaiting_tracking"
+    elif "shipped" in lower or "on the way" in lower:
+        status = "shipped"
+    else:
+        status = "awaiting_tracking"
+
+    metadata: dict[str, Any] = {
+        "merchant": "Walmart",
+        "order_id": order_match.group(1),
+        "status": status,
+        "source_domain": sender_domain,
+    }
+    if expected := _walmart_expected_delivery(message, body):
+        metadata["expected_delivery"] = expected
+    if item_match := WALMART_ITEM_COUNT_PATTERN.search(combined):
+        item_count = int(item_match.group(1))
+        metadata["item_count"] = item_count
+        metadata["description"] = (
+            f"{item_count} item" if item_count == 1 else f"{item_count} items"
+        )
+    return metadata
+
+
+def extract_merchant_orders(raw_message: bytes) -> list[dict[str, Any]]:
+    """Extract pre-tracking merchant orders from one raw email."""
+    try:
+        subject, body, sender_domain, message = _message_search_text(raw_message)
+    except (TypeError, ValueError, UnicodeError):
+        return []
+
+    walmart = _walmart_merchant_metadata(
+        message,
+        subject,
+        body,
+        sender_domain,
+    )
+    return [walmart] if walmart else []
+
+
 def _has_context(
     text_lower: str,
     header_lower: str,
@@ -245,6 +362,13 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
         body,
         sender_domain,
     )
+    if merchant is None:
+        merchant = _walmart_merchant_metadata(
+            message,
+            subject,
+            body,
+            sender_domain,
+        )
 
     candidates: list[TrackingCandidate] = []
     seen: set[str] = set()
@@ -337,6 +461,42 @@ def _extract_fetch_candidates(fetch_lines: Any) -> dict[str, TrackingCandidate]:
     return candidates
 
 
+def _extract_fetch_merchant_orders(fetch_lines: Any) -> list[dict[str, Any]]:
+    """Extract de-duplicated merchant orders from one IMAP fetch response."""
+    orders: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw_message in _iter_raw_messages(fetch_lines):
+        for order in extract_merchant_orders(raw_message):
+            merchant = str(order.get("merchant") or "")
+            order_id = str(order.get("order_id") or "")
+            if merchant and order_id:
+                orders[(merchant.lower(), order_id)] = order
+    return list(orders.values())
+
+
+def _register_message_orders(
+    registry: PackageRegistry,
+    orders: list[dict[str, Any]],
+    result: UniversalScanResult,
+) -> None:
+    """Persist merchant orders even when no carrier tracking exists yet."""
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for order in orders:
+        merchant = str(order.get("merchant") or "").strip()
+        order_id = str(order.get("order_id") or "").strip()
+        if not merchant or not order_id:
+            continue
+        metadata = {
+            key: value
+            for key, value in order.items()
+            if key not in {"merchant", "order_id"}
+        }
+        grouped.setdefault(merchant, {})[order_id] = metadata
+
+    for merchant, merchant_orders in grouped.items():
+        if registry.reconcile_merchant_orders(merchant, merchant_orders):
+            result.state_changed = True
+
+
 def _register_message_candidates(
     registry: PackageRegistry,
     candidates: dict[str, TrackingCandidate],
@@ -389,6 +549,9 @@ async def _async_scan_messages(
         if not isinstance(fetched, tuple) or len(fetched) < 2 or fetched[0] != "OK":
             result.fetch_failures += 1
             continue
+
+        merchant_orders = _extract_fetch_merchant_orders(fetched[1])
+        _register_message_orders(registry, merchant_orders, result)
 
         candidates = _extract_fetch_candidates(fetched[1])
         _register_message_candidates(registry, candidates, result)

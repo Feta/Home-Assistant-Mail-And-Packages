@@ -28,9 +28,10 @@ PROVIDER_STATUS_LIFECYCLE = {
 PROVIDER_EXCEPTION_STATUSES = {
     "alert",
     "expired",
-    "not_found",
     "undelivered",
 }
+PROVIDER_NOT_FOUND_GRACE_HOURS = 48
+NON_CARRIER_REGISTRY_PREFIXES = {"walmart"}
 
 
 class PackageRegistry:
@@ -52,6 +53,39 @@ class PackageRegistry:
     def normalize_tracking_number(tracking_number: str) -> str:
         """Normalize a tracking number for stable registry keys."""
         return str(tracking_number).strip().upper()
+
+    @staticmethod
+    def _merchant_order_key(merchant: str, order_id: str) -> str:
+        """Return a stable storage key while preserving legacy Amazon keys."""
+        merchant_name = str(merchant or "").strip()
+        order = str(order_id or "").strip()
+        if merchant_name.lower() == "amazon":
+            return order
+        return f"{merchant_name.lower()}:{order}"
+
+    @staticmethod
+    def _not_found_is_exception(package: dict[str, Any], now: datetime) -> bool:
+        """Treat provider Not Found as an exception only after a short grace period."""
+        try:
+            first_seen = datetime.fromisoformat(str(package.get("first_seen", "")))
+        except (TypeError, ValueError):
+            return True
+        if first_seen.tzinfo is None:
+            first_seen = first_seen.replace(tzinfo=UTC)
+        age_hours = (now - first_seen).total_seconds() / 3600
+        return age_hours >= PROVIDER_NOT_FOUND_GRACE_HOURS
+
+    @classmethod
+    def _provider_status_is_exception(
+        cls,
+        status_key: str,
+        package: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        """Return whether a provider status should surface as an exception."""
+        if status_key == "not_found":
+            return cls._not_found_is_exception(package, now)
+        return status_key in PROVIDER_EXCEPTION_STATUSES
 
     @property
     def packages(self) -> dict[str, dict[str, Any]]:
@@ -367,7 +401,8 @@ class PackageRegistry:
         """Merge tracking-provider status and metadata into the registry."""
         changed_count = 0
         transitions: list[dict[str, Any]] = []
-        now = datetime.now(UTC).isoformat()
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat()
 
         for remote in remote_packages:
             if not isinstance(remote, dict):
@@ -440,7 +475,11 @@ class PackageRegistry:
                     }
                 )
 
-            provider_exception = status_key in PROVIDER_EXCEPTION_STATUSES
+            provider_exception = self._provider_status_is_exception(
+                status_key,
+                package,
+                now_dt,
+            )
             if package.get("provider_exception", False) != provider_exception:
                 package["provider_exception"] = provider_exception
                 package["last_updated"] = now
@@ -448,14 +487,16 @@ class PackageRegistry:
 
         return changed_count, transitions
 
-    def reconcile_amazon_orders(
+    def reconcile_merchant_orders(
         self,
+        merchant: str,
         orders: dict[str, dict[str, Any]],
     ) -> int:
-        """Persist Amazon order metadata extracted from shipping emails."""
-        if not isinstance(orders, dict):
+        """Persist pre-tracking and shipment metadata for a merchant's orders."""
+        if not merchant or not isinstance(orders, dict):
             return 0
 
+        merchant_name = str(merchant).strip()
         changed = 0
         now = datetime.now(UTC).isoformat()
         allowed = {
@@ -464,23 +505,29 @@ class PackageRegistry:
             "status",
             "expected_delivery",
             "source_domain",
+            "item_count",
+            "description",
+            "tracking_number",
+            "carrier",
         }
 
         for order_id, metadata in orders.items():
             if not order_id or not isinstance(metadata, dict):
                 continue
 
+            order_id_str = str(order_id)
+            key = self._merchant_order_key(merchant_name, order_id_str)
             incoming = {
-                key: value
-                for key, value in metadata.items()
-                if key in allowed and value not in (None, "")
+                field: value
+                for field, value in metadata.items()
+                if field in allowed and value not in (None, "")
             }
-            existing = self._merchant_orders.get(str(order_id))
+            existing = self._merchant_orders.get(key)
             preserved = (
                 {
-                    key: value
-                    for key, value in existing.items()
-                    if key in allowed and value not in (None, "")
+                    field: value
+                    for field, value in existing.items()
+                    if field in allowed and value not in (None, "")
                 }
                 if isinstance(existing, dict)
                 else {}
@@ -488,14 +535,14 @@ class PackageRegistry:
             merged = {
                 **preserved,
                 **incoming,
-                "merchant": "Amazon",
-                "order_id": str(order_id),
+                "merchant": merchant_name,
+                "order_id": order_id_str,
             }
             comparable_existing = (
                 {
-                    key: value
-                    for key, value in existing.items()
-                    if key not in ("first_seen", "last_updated")
+                    field: value
+                    for field, value in existing.items()
+                    if field not in ("first_seen", "last_updated")
                 }
                 if isinstance(existing, dict)
                 else {}
@@ -506,29 +553,31 @@ class PackageRegistry:
             first_seen = (
                 existing.get("first_seen", now) if isinstance(existing, dict) else now
             )
-            self._merchant_orders[str(order_id)] = {
+            self._merchant_orders[key] = {
                 **merged,
                 "first_seen": first_seen,
                 "last_updated": now,
             }
             changed += 1
 
-        # A universal-scan pass may have already linked an Amazon order ID to a
-        # physical tracking number. Keep those package-level merchant records
-        # synchronized with the richer metadata extracted by the Amazon parser.
+        # Keep package-level merchant metadata synchronized with richer order data.
         for package in self._packages.values():
-            merchant = package.get("merchant")
-            if not isinstance(merchant, dict):
+            package_merchant = package.get("merchant")
+            if not isinstance(package_merchant, dict):
                 continue
-            order_id = str(merchant.get("order_id") or "")
-            order = self._merchant_orders.get(order_id)
+            order_id = str(package_merchant.get("order_id") or "")
+            package_merchant_name = str(package_merchant.get("merchant") or "")
+            if not order_id or package_merchant_name.lower() != merchant_name.lower():
+                continue
+            key = self._merchant_order_key(merchant_name, order_id)
+            order = self._merchant_orders.get(key)
             if not order:
                 continue
 
             package_metadata = {
-                key: value
-                for key, value in order.items()
-                if key
+                field: value
+                for field, value in order.items()
+                if field
                 in {
                     "merchant",
                     "order_id",
@@ -536,14 +585,18 @@ class PackageRegistry:
                     "image",
                     "expected_delivery",
                     "status",
+                    "item_count",
+                    "description",
                 }
                 and value not in (None, "")
             }
             existing_merchant = {
-                key: value for key, value in merchant.items() if value not in (None, "")
+                field: value
+                for field, value in package_merchant.items()
+                if value not in (None, "")
             }
             merged_merchant = {**existing_merchant, **package_metadata}
-            if merged_merchant == merchant:
+            if merged_merchant == package_merchant:
                 continue
 
             package["merchant"] = merged_merchant
@@ -551,6 +604,13 @@ class PackageRegistry:
             changed += 1
 
         return changed
+
+    def reconcile_amazon_orders(
+        self,
+        orders: dict[str, dict[str, Any]],
+    ) -> int:
+        """Persist Amazon order metadata extracted from shipping emails."""
+        return self.reconcile_merchant_orders("Amazon", orders)
 
     def enrich_package_merchant(
         self,
@@ -574,6 +634,8 @@ class PackageRegistry:
                 "image",
                 "expected_delivery",
                 "status",
+                "item_count",
+                "description",
             }
             and value not in (None, "")
         }
@@ -592,13 +654,120 @@ class PackageRegistry:
         package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
-    def get_amazon_orders_list(self) -> list[dict[str, Any]]:
-        """Return Amazon order metadata for dashboard use."""
+    def attach_tracking_to_order(
+        self,
+        merchant: str,
+        order_id: str,
+        tracking_number: str,
+        carrier: str = "unknown",
+    ) -> bool:
+        """Attach a manually discovered tracking number to an existing merchant order."""
+        merchant_name = str(merchant or "").strip()
+        order_id_str = str(order_id or "").strip()
+        tracking = self.normalize_tracking_number(tracking_number)
+        carrier_name = str(carrier or "unknown").strip().lower()
+        if not merchant_name or not order_id_str or not tracking:
+            return False
+
+        order_key = self._merchant_order_key(merchant_name, order_id_str)
+        order = self._merchant_orders.get(order_key)
+        if not isinstance(order, dict):
+            return False
+
+        changed = False
+        package = self._packages.get(tracking)
+        if package is None or package.get("status") == "cleared":
+            changed = self.add_package(tracking, carrier_name) or changed
+        else:
+            changed = (
+                self.register_package(
+                    tracking,
+                    carrier_name,
+                    status=package.get("status", "detected"),
+                    source="manual",
+                )
+                or changed
+            )
+
+        now = datetime.now(UTC).isoformat()
+        updated_order = {
+            **order,
+            "tracking_number": tracking,
+            "carrier": carrier_name,
+        }
+        if str(updated_order.get("status") or "").lower() in {
+            "",
+            "ordered",
+            "pending",
+            "awaiting_tracking",
+        }:
+            updated_order["status"] = "shipped"
+
+        comparable_existing = {
+            key: value for key, value in order.items() if key != "last_updated"
+        }
+        comparable_updated = {
+            key: value for key, value in updated_order.items() if key != "last_updated"
+        }
+        if comparable_existing != comparable_updated:
+            updated_order["last_updated"] = now
+            self._merchant_orders[order_key] = updated_order
+            order = updated_order
+            changed = True
+
+        merchant_data = {
+            key: value
+            for key, value in order.items()
+            if key
+            in {
+                "merchant",
+                "order_id",
+                "name",
+                "image",
+                "expected_delivery",
+                "status",
+                "item_count",
+                "description",
+            }
+            and value not in (None, "")
+        }
+        if self.enrich_package_merchant(tracking, merchant_data):
+            changed = True
+
+        return changed
+
+    def get_merchant_orders_list(
+        self,
+        merchant: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return merchant order metadata for dashboard use."""
+        orders = self._merchant_orders.values()
+        if merchant:
+            merchant_lower = merchant.lower()
+            orders = [
+                order
+                for order in orders
+                if str(order.get("merchant") or "").lower() == merchant_lower
+            ]
         return sorted(
-            self._merchant_orders.values(),
+            orders,
             key=lambda item: item.get("last_updated", ""),
             reverse=True,
         )
+
+    def get_pending_orders_list(self) -> list[dict[str, Any]]:
+        """Return orders that have not reached a terminal state."""
+        terminal = {"delivered", "cancelled", "canceled", "cleared"}
+        return [
+            order
+            for order in self.get_merchant_orders_list()
+            if not order.get("tracking_number")
+            and str(order.get("status") or "").lower() not in terminal
+        ]
+
+    def get_amazon_orders_list(self) -> list[dict[str, Any]]:
+        """Return Amazon order metadata for backward-compatible dashboards."""
+        return self.get_merchant_orders_list("Amazon")
 
     def set_exception(self, tracking_number: str, value: bool = True) -> bool:
         """Set or clear the exception flag for an active package."""
@@ -611,6 +780,20 @@ class PackageRegistry:
         package["exception"] = value
         package["last_updated"] = datetime.now(UTC).isoformat()
         return True
+
+    def _reconcile_tracking_exceptions(
+        self,
+        tracking_details: dict[str, list[str]],
+    ) -> None:
+        """Apply carrier exception flags while ignoring marketplace order IDs."""
+        for key, numbers in tracking_details.items():
+            if not key.endswith("_exception") or not isinstance(numbers, list):
+                continue
+            carrier = key.removesuffix("_exception")
+            if carrier in NON_CARRIER_REGISTRY_PREFIXES:
+                continue
+            for number in numbers:
+                self.set_exception(number, True)
 
     def reconcile_tracking_details(
         self, tracking_details: dict[str, list[str]]
@@ -625,6 +808,8 @@ class PackageRegistry:
                 if not key.endswith(suffix) or not isinstance(numbers, list):
                     continue
                 carrier = key[: -len(suffix)]
+                if carrier in NON_CARRIER_REGISTRY_PREFIXES:
+                    continue
                 for number in numbers:
                     tracking = self.normalize_tracking_number(number)
                     previous = self._packages.get(tracking, {}).get("status")
@@ -645,10 +830,7 @@ class PackageRegistry:
                                 "source": "carrier_email",
                             }
                         )
-        for key, numbers in tracking_details.items():
-            if key.endswith("_exception") and isinstance(numbers, list):
-                for number in numbers:
-                    self.set_exception(number, True)
+        self._reconcile_tracking_exceptions(tracking_details)
         return transitions
 
     def auto_expire(
@@ -727,14 +909,20 @@ class PackageRegistry:
                 continue
             if status_filter not in (None, "in_transit") and status != status_filter:
                 continue
+            tracking_provider = package.get("tracking_provider")
+            provider_exception = bool(package.get("provider_exception", False))
             result.append(
                 {
                     "tracking_number": tracking,
                     "carrier": package.get("carrier", "unknown"),
                     "status": status,
                     "exception": bool(
-                        package.get("exception", False)
-                        or package.get("provider_exception", False)
+                        package.get("exception", False) or provider_exception
+                    ),
+                    "awaiting_carrier_activation": bool(
+                        isinstance(tracking_provider, dict)
+                        and tracking_provider.get("status_key") == "not_found"
+                        and not provider_exception
                     ),
                     "source": package.get("source", "unknown"),
                     "first_seen": package.get("first_seen", ""),
@@ -745,7 +933,7 @@ class PackageRegistry:
                         if isinstance(package.get("forwarded_to"), dict)
                         else []
                     ),
-                    "tracking_provider": package.get("tracking_provider"),
+                    "tracking_provider": tracking_provider,
                     "merchant": package.get("merchant"),
                 }
             )
@@ -761,5 +949,7 @@ class PackageRegistry:
             "registry_packages_list": self.get_packages_list(),
             "registry_in_transit_list": self.get_packages_list("in_transit"),
             "registry_delivered_list": self.get_packages_list("delivered"),
+            "registry_merchant_orders_list": self.get_merchant_orders_list(),
+            "registry_pending_orders_list": self.get_pending_orders_list(),
             "registry_amazon_orders_list": self.get_amazon_orders_list(),
         }

@@ -98,6 +98,22 @@ async def test_reconcile_does_not_downgrade_delivered(registry):
 
 
 @pytest.mark.asyncio
+async def test_walmart_order_id_is_not_registered_as_carrier_tracking(registry):
+    """Walmart's merchant order ID should not be forwarded as carrier tracking."""
+    await registry.async_load()
+
+    transitions = registry.reconcile_tracking_details(
+        {
+            "walmart_delivering": ["2000153-93327828"],
+            "walmart_exception": ["2000153-93327828"],
+        }
+    )
+
+    assert transitions == []
+    assert registry.packages == {}
+
+
+@pytest.mark.asyncio
 async def test_counts_and_coordinator_data(registry):
     """Registry should expose dashboard-friendly summary data."""
     await registry.async_load()
@@ -226,6 +242,91 @@ async def test_amazon_orders_and_merchant_metadata(registry):
     assert package["merchant"]["status"] == "delivered"
     assert package["merchant"]["expected_delivery"] == "2026-09-25"
     assert package["merchant"]["image"].startswith("https://m.media-amazon.com/")
+
+
+@pytest.mark.asyncio
+async def test_generic_merchant_order_can_attach_tracking(registry):
+    """A pending Walmart order should accept manually retrieved carrier tracking."""
+    await registry.async_load()
+    assert registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "awaiting_tracking",
+                "expected_delivery": "2026-10-01",
+                "item_count": 2,
+                "description": "2 items",
+            }
+        },
+    )
+
+    assert registry.attach_tracking_to_order(
+        "Walmart",
+        "2000153-93327828",
+        "123456789012",
+        "fedex",
+    )
+
+    package = registry.packages["123456789012"]
+    assert package["carrier"] == "fedex"
+    assert package["source"] == "manual"
+    assert package["merchant"]["merchant"] == "Walmart"
+    assert package["merchant"]["order_id"] == "2000153-93327828"
+    assert package["merchant"]["expected_delivery"] == "2026-10-01"
+
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["tracking_number"] == "123456789012"
+    assert order["carrier"] == "fedex"
+    assert order["status"] == "shipped"
+
+    data = registry.coordinator_data()
+    assert data["registry_pending_orders_list"] == []
+
+
+@pytest.mark.asyncio
+async def test_attach_tracking_requires_existing_order(registry):
+    """Manual order attachment should not invent an unknown merchant order."""
+    await registry.async_load()
+    assert not registry.attach_tracking_to_order(
+        "Walmart",
+        "missing",
+        "123456789012",
+        "fedex",
+    )
+    assert registry.packages == {}
+
+
+@pytest.mark.asyncio
+async def test_provider_not_found_has_grace_period(registry):
+    """A newly discovered label should not be an exception while carriers activate it."""
+    await registry.async_load()
+    registry.register_package("9400111899560000000000", "usps", "detected")
+    registry.packages["9400111899560000000000"]["first_seen"] = (
+        datetime.now(UTC) - timedelta(hours=24)
+    ).isoformat()
+
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "9400111899560000000000", "status": "Not Found"}],
+    )
+
+    package = registry.get_packages_list()[0]
+    assert package["exception"] is False
+    assert package["awaiting_carrier_activation"] is True
+
+    registry.packages["9400111899560000000000"]["first_seen"] = (
+        datetime.now(UTC) - timedelta(hours=49)
+    ).isoformat()
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "9400111899560000000000", "status": "Not Found"}],
+    )
+
+    package = registry.get_packages_list()[0]
+    assert package["exception"] is True
+    assert package["awaiting_carrier_activation"] is False
 
 
 @pytest.mark.asyncio
