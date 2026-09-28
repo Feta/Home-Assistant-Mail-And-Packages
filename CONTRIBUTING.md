@@ -1,51 +1,48 @@
 # Contribution guidelines
 
-Contributing to this project should be as easy and transparent as possible, whether it's:
+Contributions to this fork are welcome, including bug fixes, tests, shipper updates, documentation, and improvements to the Super Tracking pipeline.
 
-- Reporting a bug
-- Discussing the current state of the code
-- Submitting a fix
-- Proposing new features
+## Development flow
 
-## Github is used for everything
+1. Create a short-lived branch from `master`.
+2. Keep changes focused and update documentation when behavior changes.
+3. Run `pre-commit run --all-files`.
+4. Run the relevant tests locally; `tox` matches the CI test workflow.
+5. Open a pull request back to `master`.
 
-Github is used to host code, to track issues and feature requests, as well as accept pull requests.
+CI runs pre-commit, the Python test suite, HACS/Hassfest validation, and CodeQL checks on pull requests.
 
-Pull requests are the best way to propose changes to the codebase.
+## Fork and upstream scope
 
-1. Fork the repo and create your branch from `dev`.
-2. If you've changed something, update the documentation.
-3. Make sure your code lints (using black).
-4. Test you contribution.
-5. Issue that pull request!
+This repository is a fork of [moralmunky/Home-Assistant-Mail-And-Packages](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages). Base-integration fixes from upstream should be reviewed selectively before being ported so they do not break the persistent registry or Super Tracking behavior.
 
-## Any contributions you make will be under the MIT Software License
+Please keep original attribution intact when carrying upstream work into this fork.
 
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
+## Bug reports
 
-## Report bugs using Github's [issues](../../issues)
+Use the fork's [issue tracker](../../issues) for bugs involving this repository, especially the persistent package registry, universal scanner, 17TRACK forwarding/enrichment, merchant-order tracking, or fork-specific HACS installation.
 
-GitHub issues are used to track public bugs.
-Report a bug by [opening a new issue](../../issues/new/choose); it's that easy!
+For base Mail and Packages documentation, the [upstream wiki](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wiki) remains the primary reference.
 
-## Write bug reports with detail, background, and sample code
+Useful bug reports include:
 
-**Great Bug Reports** tend to have:
+- A concise description of the problem
+- Steps to reproduce it
+- What you expected to happen
+- What actually happened
+- Relevant Home Assistant and Mail and Packages versions
+- Diagnostics or log excerpts with secrets and personal data removed
 
-- A quick summary and/or background
-- Steps to reproduce
-  - Be specific!
-  - Give sample code if you can.
-- What you expected would happen
-- What actually happens
-- Notes (possibly including why you think this might be happening, or stuff you tried that didn't work)
+## Coding style
 
-People *love* thorough bug reports. I'm not even kidding.
+The repository's pre-commit configuration is the source of truth for formatting and linting. Run:
 
-## Use a Consistent Coding Style
+```bash
+pre-commit run --all-files
+```
 
-Use [black](https://github.com/ambv/black) to make sure the code follows the style.
+before opening a pull request.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under its MIT License.
+By contributing, you agree that your contributions are licensed under the same MIT License that covers this repository.

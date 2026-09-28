@@ -18,6 +18,9 @@ autolabeler:
   - label: "code-quality"
     title:
       - "/tests:/i"
+  - label: "documentation"
+    title:
+      - "/docs:/i"
 categories:
   - title: "💥 Breaking Change 💥"
     labels:
@@ -43,10 +46,12 @@ categories:
     labels:
       - "documentation"
 template: |
-  [![Downloads for this release](https://img.shields.io/github/downloads/moralmunky/Home-Assistant-Mail-And-Packages/$RESOLVED_VERSION/total)](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/releases/$RESOLVED_VERSION)
+  [![Downloads for this release](https://img.shields.io/github/downloads/Feta/Home-Assistant-Mail-And-Packages/$RESOLVED_VERSION/total)](https://github.com/Feta/Home-Assistant-Mail-And-Packages/releases/$RESOLVED_VERSION)
 
   $CHANGES
 
   ## Links
-  - [Wiki](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wiki)
-  - [Submit bugs/feature requests](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/issues)
+  - [Fork README](https://github.com/Feta/Home-Assistant-Mail-And-Packages#readme)
+  - [Report fork bugs / request features](https://github.com/Feta/Home-Assistant-Mail-And-Packages/issues)
+  - [Upstream wiki](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wiki)
+  - [Original upstream project](https://github.com/moralmunky/Home-Assistant-Mail-And-Packages)

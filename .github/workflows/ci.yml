@@ -5,8 +5,7 @@ on:
   pull_request:
   push:
     branches:
-      - dev
-      - ci-updates
+      - master
 
 permissions: read-all
 

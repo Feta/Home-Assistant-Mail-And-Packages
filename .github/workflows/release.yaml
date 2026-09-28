@@ -1,7 +1,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
   release:
     types: [published]
 
@@ -18,12 +17,14 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Check out repository
+      - name: Check out release tag
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Get Version
         id: get_version
-        run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
 
       - name: "Set version number"
         run: |

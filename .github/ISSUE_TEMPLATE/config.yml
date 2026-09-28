@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Questions & Support
+  - name: Upstream documentation
+    url: https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/wiki
+    about: Use the original project wiki for base Mail and Packages configuration and shipper documentation.
+  - name: Upstream discussions
     url: https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/discussions
-    about: Please ask and answer questions here.
+    about: Use upstream discussions for questions about the original integration that are not specific to Super Tracking.
