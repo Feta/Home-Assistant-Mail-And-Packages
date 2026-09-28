@@ -31,6 +31,7 @@ PROVIDER_EXCEPTION_STATUSES = {
     "undelivered",
 }
 PROVIDER_NOT_FOUND_GRACE_HOURS = 48
+NON_CARRIER_REGISTRY_PREFIXES = {"walmart"}
 
 
 class PackageRegistry:
@@ -793,6 +794,8 @@ class PackageRegistry:
                 if not key.endswith(suffix) or not isinstance(numbers, list):
                     continue
                 carrier = key[: -len(suffix)]
+                if carrier in NON_CARRIER_REGISTRY_PREFIXES:
+                    continue
                 for number in numbers:
                     tracking = self.normalize_tracking_number(number)
                     previous = self._packages.get(tracking, {}).get("status")
@@ -815,6 +818,9 @@ class PackageRegistry:
                         )
         for key, numbers in tracking_details.items():
             if key.endswith("_exception") and isinstance(numbers, list):
+                carrier = key.removesuffix("_exception")
+                if carrier in NON_CARRIER_REGISTRY_PREFIXES:
+                    continue
                 for number in numbers:
                     self.set_exception(number, True)
         return transitions
