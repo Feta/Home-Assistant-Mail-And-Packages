@@ -781,6 +781,20 @@ class PackageRegistry:
         package["last_updated"] = datetime.now(UTC).isoformat()
         return True
 
+    def _reconcile_tracking_exceptions(
+        self,
+        tracking_details: dict[str, list[str]],
+    ) -> None:
+        """Apply carrier exception flags while ignoring marketplace order IDs."""
+        for key, numbers in tracking_details.items():
+            if not key.endswith("_exception") or not isinstance(numbers, list):
+                continue
+            carrier = key.removesuffix("_exception")
+            if carrier in NON_CARRIER_REGISTRY_PREFIXES:
+                continue
+            for number in numbers:
+                self.set_exception(number, True)
+
     def reconcile_tracking_details(
         self, tracking_details: dict[str, list[str]]
     ) -> list[dict[str, Any]]:
@@ -816,13 +830,7 @@ class PackageRegistry:
                                 "source": "carrier_email",
                             }
                         )
-        for key, numbers in tracking_details.items():
-            if key.endswith("_exception") and isinstance(numbers, list):
-                carrier = key.removesuffix("_exception")
-                if carrier in NON_CARRIER_REGISTRY_PREFIXES:
-                    continue
-                for number in numbers:
-                    self.set_exception(number, True)
+        self._reconcile_tracking_exceptions(tracking_details)
         return transitions
 
     def auto_expire(
