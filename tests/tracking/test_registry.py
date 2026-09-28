@@ -98,6 +98,22 @@ async def test_reconcile_does_not_downgrade_delivered(registry):
 
 
 @pytest.mark.asyncio
+async def test_walmart_order_id_is_not_registered_as_carrier_tracking(registry):
+    """Walmart's merchant order ID should not be forwarded as carrier tracking."""
+    await registry.async_load()
+
+    transitions = registry.reconcile_tracking_details(
+        {
+            "walmart_delivering": ["2000153-93327828"],
+            "walmart_exception": ["2000153-93327828"],
+        }
+    )
+
+    assert transitions == []
+    assert registry.packages == {}
+
+
+@pytest.mark.asyncio
 async def test_counts_and_coordinator_data(registry):
     """Registry should expose dashboard-friendly summary data."""
     await registry.async_load()
