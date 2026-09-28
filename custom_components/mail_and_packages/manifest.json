@@ -13,15 +13,15 @@
   "dependencies": [
     "application_credentials"
   ],
-  "documentation": "https://github.com/moralmunky/Home-Assistant-Mail-And-Packages",
+  "documentation": "https://github.com/Feta/Home-Assistant-Mail-And-Packages",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/moralmunky/Home-Assistant-Mail-And-Packages/issues",
+  "issue_tracker": "https://github.com/Feta/Home-Assistant-Mail-And-Packages/issues",
   "requirements": [
     "beautifulsoup4",
     "Pillow>=9.0",
     "dateparser",
     "aioimaplib"
   ],
-  "version": "0.8.0b1"
+  "version": "0.8.0b2"
 }
