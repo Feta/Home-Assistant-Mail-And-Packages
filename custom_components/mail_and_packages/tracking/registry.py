@@ -760,7 +760,8 @@ class PackageRegistry:
         return [
             order
             for order in self.get_merchant_orders_list()
-            if str(order.get("status") or "").lower() not in terminal
+            if not order.get("tracking_number")
+            and str(order.get("status") or "").lower() not in terminal
         ]
 
     def get_amazon_orders_list(self) -> list[dict[str, Any]]:
