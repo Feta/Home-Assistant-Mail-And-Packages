@@ -3,7 +3,8 @@
 import asyncio
 import datetime
 from http import HTTPStatus
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientResponseError
@@ -14,7 +15,11 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mail_and_packages.const import CONF_FOLDER, DOMAIN
+from custom_components.mail_and_packages.const import (
+    CONF_FOLDER,
+    CONF_FORWARD_TO_SEVENTEENTRACK,
+    DOMAIN,
+)
 from custom_components.mail_and_packages.coordinator import MailDataUpdateCoordinator
 from custom_components.mail_and_packages.coordinator.helpers import (
     sum_delivered_counts,
@@ -119,6 +124,78 @@ async def test_process_emails_invalid_return(hass):
 
     # Should just not crash, missing data ok
     assert "test_sensor" not in data
+
+
+@pytest.mark.asyncio
+async def test_registry_refresh_reconciles_linked_package_statuses(hass):
+    """Normal registry refresh should repair persisted package/order lifecycle drift."""
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, FAKE_CONFIG_DATA)
+
+    registry = MagicMock()
+    registry.async_load = AsyncMock()
+    registry.reconcile_tracking_details.return_value = []
+    registry.reconcile_amazon_orders.return_value = 0
+    registry.reconcile_linked_package_statuses.return_value = 1
+    registry.auto_expire.return_value = 0
+    registry.coordinator_data.return_value = {"registry_tracked": 2}
+    registry.async_save = AsyncMock()
+    coordinator.registry = registry
+
+    data = {}
+    await coordinator._update_package_registry(data, {}, {})
+
+    registry.reconcile_linked_package_statuses.assert_called_once_with()
+    registry.async_save.assert_awaited_once_with()
+    assert data["registry_tracked"] == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_refresh_reconciles_linked_package_statuses(hass):
+    """Provider lifecycle enrichment should immediately flow into merchant shipments."""
+    config = {
+        **FAKE_CONFIG_DATA,
+        CONF_FORWARD_TO_SEVENTEENTRACK: True,
+    }
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, config)
+
+    registry = MagicMock()
+    registry.reconcile_tracking_provider_packages.return_value = (1, [])
+    registry.reconcile_linked_package_statuses.return_value = 1
+    registry.coordinator_data.return_value = {"registry_tracked": 2}
+    registry.async_save = AsyncMock()
+    coordinator.registry = registry
+
+    snapshot = SimpleNamespace(
+        service_available=True,
+        config_entry_id="17track-entry",
+        packages=[{"tracking_number": "877829797830", "status": "In Transit"}],
+    )
+    forwarding_result = SimpleNamespace(
+        forwarded=0,
+        existing_remote=0,
+        service_available=True,
+        failed=0,
+    )
+    with (
+        patch(
+            "custom_components.mail_and_packages.coordinator."
+            "async_get_seventeentrack_snapshot",
+            new=AsyncMock(return_value=snapshot),
+        ),
+        patch(
+            "custom_components.mail_and_packages.coordinator."
+            "async_forward_pending_to_seventeentrack",
+            new=AsyncMock(return_value=forwarding_result),
+        ),
+    ):
+        data = {}
+        await coordinator._async_forward_registry_packages(data)
+
+    registry.reconcile_linked_package_statuses.assert_called_once_with()
+    registry.async_save.assert_awaited_once_with()
+    assert data["registry_tracked"] == 2
 
 
 @pytest.mark.asyncio
