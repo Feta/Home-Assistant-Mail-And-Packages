@@ -278,6 +278,7 @@ def _item_count_metadata(
         ),
     }
 
+
 def _amazon_merchant_metadata(
     message: Any,
     subject: str,
@@ -391,8 +392,7 @@ def _walmart_shipments(message: Any, body: str) -> list[dict[str, Any]]:
             shipment["expected_delivery"] = expected
 
         item_counts = [
-            int(found.group(1))
-            for found in WALMART_ITEM_COUNT_PATTERN.finditer(block)
+            int(found.group(1)) for found in WALMART_ITEM_COUNT_PATTERN.finditer(block)
         ]
         if item_counts:
             item_count = max(item_counts)
@@ -450,9 +450,7 @@ def _walmart_shipment_summary(shipments: list[dict[str, Any]]) -> dict[str, Any]
     ]
     if item_counts:
         item_count = sum(item_counts)
-        item_label = (
-            f"{item_count} item" if item_count == 1 else f"{item_count} items"
-        )
+        item_label = f"{item_count} item" if item_count == 1 else f"{item_count} items"
         metadata["item_count"] = item_count
         metadata["description"] = (
             f"{item_label} • {len(shipments)} shipments"
@@ -532,6 +530,7 @@ def _shipment_merchant_metadata(
             "part_count": shipment.get("part_count"),
         }
     return merchant
+
 
 def extract_merchant_orders(raw_message: bytes) -> list[dict[str, Any]]:
     """Extract pre-tracking merchant orders from one raw email."""
@@ -718,9 +717,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
                     merchant=_shipment_merchant_metadata(merchant, tracking),
                     status=lifecycle or "detected",
                     source=(
-                        "carrier_email"
-                        if lifecycle is not None
-                        else "universal_scan"
+                        "carrier_email" if lifecycle is not None else "universal_scan"
                     ),
                 )
             )
