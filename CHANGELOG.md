@@ -2,6 +2,14 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b6 - 2026-09-30
+
+### Tracking accuracy
+
+- Require explicit UPS evidence near a `1Z...` value or in the sender/subject before accepting it as a UPS package; generic words such as `package` or `delivery` are no longer sufficient.
+- Add regression coverage for the real USPS Informed Delivery plaintext URL-token failure mode that resurrected a bogus UPS package after the b5 rescan.
+- Bump the universal scanner UID generation so recent shipping mail is reparsed with the stricter UPS rule.
+
 ## 0.8.0b5 - 2026-09-30
 
 ### Live mail parsing
