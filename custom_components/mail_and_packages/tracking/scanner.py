@@ -641,9 +641,7 @@ def _has_context(
     # Accept explicit UPS evidence or a recognized merchant message that
     # genuinely exposes a shipment/tracking value.
     if pattern.carrier == "ups":
-        return local_shipping and (
-            carrier_nearby or carrier_header or merchant_context
-        )
+        return local_shipping and (carrier_nearby or carrier_header or merchant_context)
 
     if carrier_nearby and local_shipping:
         return True
