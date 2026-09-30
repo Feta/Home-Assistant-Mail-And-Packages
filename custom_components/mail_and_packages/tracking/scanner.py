@@ -430,9 +430,7 @@ def _walmart_shipment_summary(shipments: list[dict[str, Any]]) -> dict[str, Any]
     """Build order-level summary fields from parsed Walmart shipment parts."""
     metadata: dict[str, Any] = {
         "shipments": shipments,
-        "tracking_numbers": [
-            shipment["tracking_number"] for shipment in shipments
-        ],
+        "tracking_numbers": [shipment["tracking_number"] for shipment in shipments],
     }
 
     expected_dates = [

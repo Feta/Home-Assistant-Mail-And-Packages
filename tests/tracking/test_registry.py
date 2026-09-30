@@ -389,40 +389,43 @@ async def test_split_merchant_order_keeps_package_specific_metadata(registry):
         },
     )
 
-    assert registry.reconcile_merchant_orders(
-        "Walmart",
-        {
-            "2000153-93327828": {
-                "status": "shipped",
-                "expected_delivery": "2026-10-01",
-                "item_count": 2,
-                "description": "2 items • 2 shipments",
-                "tracking_numbers": ["540576743144", "877829797830"],
-                "shipments": [
-                    {
-                        "part_number": 1,
-                        "part_count": 2,
-                        "tracking_number": "540576743144",
-                        "carrier": "fedex",
-                        "status": "shipped",
-                        "expected_delivery": "2026-09-30",
-                        "item_count": 1,
-                        "description": "1 item",
-                    },
-                    {
-                        "part_number": 2,
-                        "part_count": 2,
-                        "tracking_number": "877829797830",
-                        "carrier": "fedex",
-                        "status": "shipped",
-                        "expected_delivery": "2026-10-01",
-                        "item_count": 1,
-                        "description": "1 item",
-                    },
-                ],
-            }
-        },
-    ) == 0
+    assert (
+        registry.reconcile_merchant_orders(
+            "Walmart",
+            {
+                "2000153-93327828": {
+                    "status": "shipped",
+                    "expected_delivery": "2026-10-01",
+                    "item_count": 2,
+                    "description": "2 items • 2 shipments",
+                    "tracking_numbers": ["540576743144", "877829797830"],
+                    "shipments": [
+                        {
+                            "part_number": 1,
+                            "part_count": 2,
+                            "tracking_number": "540576743144",
+                            "carrier": "fedex",
+                            "status": "shipped",
+                            "expected_delivery": "2026-09-30",
+                            "item_count": 1,
+                            "description": "1 item",
+                        },
+                        {
+                            "part_number": 2,
+                            "part_count": 2,
+                            "tracking_number": "877829797830",
+                            "carrier": "fedex",
+                            "status": "shipped",
+                            "expected_delivery": "2026-10-01",
+                            "item_count": 1,
+                            "description": "1 item",
+                        },
+                    ],
+                }
+            },
+        )
+        == 0
+    )
 
     first = registry.packages["540576743144"]["merchant"]
     second = registry.packages["877829797830"]["merchant"]
@@ -491,10 +494,7 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
     assert order["status"] == "out_for_delivery"
     assert order["shipments"][0]["status"] == "out_for_delivery"
     assert order["shipments"][1]["status"] == "shipped"
-    assert (
-        registry.packages["540576743144"]["merchant"]["status"]
-        == "out_for_delivery"
-    )
+    assert registry.packages["540576743144"]["merchant"]["status"] == "out_for_delivery"
 
 
 @pytest.mark.asyncio

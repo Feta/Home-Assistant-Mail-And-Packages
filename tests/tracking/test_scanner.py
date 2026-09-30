@@ -153,8 +153,8 @@ def test_opaque_usps_url_token_is_not_accepted_as_ups_tracking():
         b"Content-Type: text/html; charset=utf-8\r\n"
         b"\r\n"
         b"<p>Manage package delivery notifications.</p>"
-        b"<a href=\"https://example.invalid/unsubscribe/"
-        b"token-1ZC0ZTTJUTJB6XPKFG-more-token\">unsubscribe</a>"
+        b'<a href="https://example.invalid/unsubscribe/'
+        b'token-1ZC0ZTTJUTJB6XPKFG-more-token">unsubscribe</a>'
     )
 
     candidates = extract_tracking_candidates(raw)

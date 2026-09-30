@@ -548,7 +548,6 @@ class PackageRegistry:
             ) > cls._merchant_status_rank(shipment.get("status")):
                 shipment["status"] = previous.get("status")
 
-
     @staticmethod
     def _merchant_order_fields() -> set[str]:
         """Return persisted merchant-order metadata fields."""
@@ -695,7 +694,6 @@ class PackageRegistry:
         )
         return changed
 
-
     @staticmethod
     def _shipment_for_tracking(
         order: dict[str, Any],
@@ -759,9 +757,7 @@ class PackageRegistry:
             if value not in (None, ""):
                 metadata[field] = value
         return {
-            field: value
-            for field, value in metadata.items()
-            if value not in (None, "")
+            field: value for field, value in metadata.items() if value not in (None, "")
         }
 
     @staticmethod
@@ -866,7 +862,6 @@ class PackageRegistry:
             package["last_updated"] = now
             order["last_updated"] = now
         return changed
-
 
     def reconcile_amazon_orders(
         self,
