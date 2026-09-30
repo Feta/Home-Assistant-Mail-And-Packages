@@ -372,6 +372,12 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 detected,
             )
 
+        for transition in scan_result.transitions:
+            self.hass.bus.async_fire(
+                f"{const.DOMAIN}_package_{transition['status']}",
+                transition,
+            )
+
         if scan_result.fetch_failures:
             _LOGGER.debug(
                 "Universal tracking scan skipped %s message(s) after fetch failures",

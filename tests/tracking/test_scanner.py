@@ -89,6 +89,7 @@ def test_amazon_tracking_carries_order_and_item_metadata():
         "merchant": "Amazon",
         "order_id": "123-1234567-1234567",
         "name": "Bambu Lab Filament Dryer",
+        "status": "shipped",
     }
 
 
@@ -141,6 +142,105 @@ def test_walmart_item_count_prefers_order_summary():
 
     assert orders[0]["item_count"] == 2
     assert orders[0]["description"] == "2 items"
+
+
+def test_opaque_usps_url_token_is_not_accepted_as_ups_tracking():
+    """A 1Z-shaped value inside an HTML href is not a UPS package."""
+    raw = (
+        b"From: USPS Informed Delivery "
+        b"<USPSInformeddelivery@email.informeddelivery.usps.com>\r\n"
+        b"Subject: Your Daily Digest is ready to view\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"\r\n"
+        b"<p>Manage package delivery notifications.</p>"
+        b'<a href="https://example.invalid/unsubscribe/'
+        b'token-1ZC0ZTTJUTJB6XPKFG-more-token">unsubscribe</a>'
+    )
+
+    candidates = extract_tracking_candidates(raw)
+
+    assert not any(item.carrier == "ups" for item in candidates)
+
+
+def test_fedex_carrier_email_advances_lifecycle():
+    """Carrier-authored FedEx status mail should be authoritative lifecycle evidence."""
+    candidates = extract_tracking_candidates(
+        _message(
+            "Tracking details\nTracking ID\n540576743144",
+            subject="Your shipment is out for delivery today 540576743144",
+            sender="TrackingUpdates@fedex.com",
+        )
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].tracking_number == "540576743144"
+    assert candidates[0].status == "out_for_delivery"
+    assert candidates[0].source == "carrier_email"
+
+
+def test_walmart_split_shipment_metadata_is_tracking_specific():
+    """Each Walmart tracking number should retain its own part/date/item metadata."""
+    raw = (
+        b"From: Walmart.com <help@walmart.com>\r\n"
+        b"Date: Mon, 28 Sep 2026 21:16:00 +0000\r\n"
+        b"Subject: Shipped: Aeon Flux (Steelbook)... and 1 other item\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Order number: 2000153-93327828\r\n"
+        b"Your packages shipped!\r\n"
+        b"Part 1 of 2\r\n"
+        b"Arrives Wed, Sep 30\r\n"
+        b"1 item\r\n"
+        b"Fedex tracking number 540576743144\r\n"
+        b"Part 2 of 2\r\n"
+        b"Arrives Thu, Oct 1\r\n"
+        b"1 item\r\n"
+        b"Fedex tracking number 877829797830\r\n"
+    )
+
+    orders = extract_merchant_orders(raw)
+    assert len(orders) == 1
+    order = orders[0]
+    assert order["merchant"] == "Walmart"
+    assert order["order_id"] == "2000153-93327828"
+    assert order["item_count"] == 2
+    assert order["description"] == "2 items • 2 shipments"
+    assert order["expected_delivery"] == "2026-10-01"
+    assert order["tracking_numbers"] == ["540576743144", "877829797830"]
+    assert order["shipments"][0]["expected_delivery"] == "2026-09-30"
+    assert order["shipments"][1]["expected_delivery"] == "2026-10-01"
+
+    candidates = {
+        item.tracking_number: item for item in extract_tracking_candidates(raw)
+    }
+    assert candidates["540576743144"].merchant["part_number"] == 1
+    assert candidates["540576743144"].merchant["expected_delivery"] == "2026-09-30"
+    assert candidates["877829797830"].merchant["part_number"] == 2
+    assert candidates["877829797830"].merchant["expected_delivery"] == "2026-10-01"
+
+
+def test_amazon_shipped_order_adds_item_count_and_relative_arrival_date():
+    """Amazon shipment mail should enrich retained merchant-order metadata."""
+    raw = (
+        b"From: Amazon.com <shipment-tracking@amazon.com>\r\n"
+        b"Date: Tue, 29 Sep 2026 12:50:38 +0000\r\n"
+        b"Subject: Shipped 3 items: Nursery, Baby Products\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Konstantinos, your Nursery item and more were shipped!\r\n"
+        b"Arriving Thursday\r\n"
+        b"3 items: 1 Nursery, 2 Baby Products\r\n"
+        b"Order # 112-6647594-5222622\r\n"
+    )
+
+    orders = extract_merchant_orders(raw)
+    assert len(orders) == 1
+    assert orders[0]["merchant"] == "Amazon"
+    assert orders[0]["order_id"] == "112-6647594-5222622"
+    assert orders[0]["status"] == "shipped"
+    assert orders[0]["item_count"] == 3
+    assert orders[0]["description"] == "3 items"
+    assert orders[0]["expected_delivery"] == "2026-10-01"
 
 
 def test_fedex_numeric_requires_shipping_context():
@@ -240,7 +340,7 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     assert result.state_changed
     assert registry.packages["1Z999AA10123456784"]["source"] == "universal_scan"
     assert registry.packages["1Z999AA10123456784"]["source_from"] == "example.com"
-    assert registry.is_uid_processed("v5:Packages/123")
+    assert registry.is_uid_processed("v6:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -279,6 +379,7 @@ async def test_scan_links_amazon_metadata_to_registered_package(registry, accoun
         "merchant": "Amazon",
         "order_id": "123-1234567-1234567",
         "name": "Bambu Lab Filament Dryer",
+        "status": "shipped",
     }
 
 
@@ -318,13 +419,13 @@ async def test_scan_persists_walmart_order_without_tracking(registry, account):
     assert len(orders) == 1
     assert orders[0]["order_id"] == "2000153-93327828"
     assert orders[0]["status"] == "awaiting_tracking"
-    assert registry.is_uid_processed("v5:Packages/789")
+    assert registry.is_uid_processed("v6:Packages/789")
 
 
 @pytest.mark.asyncio
 async def test_scan_skips_previously_processed_uid(registry, account):
     """Previously processed messages should not be fetched again."""
-    registry.mark_uid_processed("v5:Packages/123")
+    registry.mark_uid_processed("v6:Packages/123")
     cache = MagicMock()
     cache.fetch = AsyncMock()
 
@@ -365,7 +466,7 @@ async def test_scan_retries_fetch_failure(registry, account):
         )
 
     assert result.fetch_failures == 1
-    assert not registry.is_uid_processed("v5:Packages/123")
+    assert not registry.is_uid_processed("v6:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -388,10 +489,10 @@ async def test_scan_processes_newest_messages_in_bounded_batches(registry, accou
         )
 
     assert result.scanned_messages == 2
-    assert not registry.is_uid_processed("v5:Packages/1")
-    assert not registry.is_uid_processed("v5:Packages/2")
-    assert registry.is_uid_processed("v5:Packages/3")
-    assert registry.is_uid_processed("v5:Packages/4")
+    assert not registry.is_uid_processed("v6:Packages/1")
+    assert not registry.is_uid_processed("v6:Packages/2")
+    assert registry.is_uid_processed("v6:Packages/3")
+    assert registry.is_uid_processed("v6:Packages/4")
 
 
 @pytest.mark.asyncio
@@ -423,8 +524,8 @@ async def test_scan_timeout_preserves_partial_progress(registry, account):
 
     assert result.timed_out
     assert result.scanned_messages == 1
-    assert registry.is_uid_processed("v5:Packages/1")
-    assert not registry.is_uid_processed("v5:Packages/2")
+    assert registry.is_uid_processed("v6:Packages/1")
+    assert not registry.is_uid_processed("v6:Packages/2")
     assert "1Z999AA10123456784" in registry.packages
     assert "TBA123456789012" not in registry.packages
 
@@ -454,4 +555,4 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
 
     assert not result.detected
     assert registry.packages["1Z999AA10123456784"]["status"] == "cleared"
-    assert registry.is_uid_processed("v5:Packages/123")
+    assert registry.is_uid_processed("v6:Packages/123")

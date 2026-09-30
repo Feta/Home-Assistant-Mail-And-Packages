@@ -9,7 +9,7 @@
 
 ## About this fork
 
-**Current beta:** `0.8.0b4`
+**Current beta:** `0.8.0b5`
 
 The original **Mail and Packages** integration connects to your email account and creates Home Assistant sensors for mail and package activity. This fork preserves that functionality while adding an optional, persistent package-tracking pipeline designed to keep package history and tracking metadata useful beyond a single day's email scan.
 
@@ -22,6 +22,9 @@ The original **Mail and Packages** integration connects to your email account an
 - Amazon order and item metadata enrichment when shipping email can be correlated to a tracking number
 - Amazon expected-delivery and delivery-state metadata
 - Walmart pending-order discovery before carrier tracking is available
+- Direct carrier-email lifecycle updates for trusted FedEx/UPS/USPS/DHL senders
+- Walmart split-shipment correlation with per-part tracking, delivery dates, and item counts
+- Hardened UPS detection to reject tracking-shaped tokens embedded in unrelated URLs
 - Manual tracking attachment for linking a retrieved carrier number back to a known merchant order
 - Support for newer Amazon itemized subjects such as `Shipped 2 items: ...` and `Ordered 1 item: ...`
 - Manual package lifecycle support for packages that cannot be discovered automatically

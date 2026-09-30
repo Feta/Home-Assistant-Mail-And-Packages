@@ -322,6 +322,208 @@ async def test_merchant_rescan_does_not_downgrade_attached_order(registry):
 
 
 @pytest.mark.asyncio
+async def test_split_merchant_order_keeps_package_specific_metadata(registry):
+    """Split orders should enrich each package with only its own shipment metadata."""
+    await registry.async_load()
+    assert registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "shipped",
+                "expected_delivery": "2026-10-01",
+                "item_count": 2,
+                "description": "2 items • 2 shipments",
+                "tracking_numbers": ["540576743144", "877829797830"],
+                "shipments": [
+                    {
+                        "part_number": 1,
+                        "part_count": 2,
+                        "tracking_number": "540576743144",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                        "expected_delivery": "2026-09-30",
+                        "item_count": 1,
+                        "description": "1 item",
+                    },
+                    {
+                        "part_number": 2,
+                        "part_count": 2,
+                        "tracking_number": "877829797830",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                        "expected_delivery": "2026-10-01",
+                        "item_count": 1,
+                        "description": "1 item",
+                    },
+                ],
+            }
+        },
+    )
+
+    registry.register_package("540576743144", "fedex", "detected")
+    registry.enrich_package_merchant(
+        "540576743144",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 1,
+            "part_count": 2,
+            "expected_delivery": "2026-09-30",
+            "item_count": 1,
+            "description": "1 item",
+            "status": "shipped",
+        },
+    )
+    registry.register_package("877829797830", "fedex", "detected")
+    registry.enrich_package_merchant(
+        "877829797830",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 2,
+            "part_count": 2,
+            "expected_delivery": "2026-10-01",
+            "item_count": 1,
+            "description": "1 item",
+            "status": "shipped",
+        },
+    )
+
+    assert (
+        registry.reconcile_merchant_orders(
+            "Walmart",
+            {
+                "2000153-93327828": {
+                    "status": "shipped",
+                    "expected_delivery": "2026-10-01",
+                    "item_count": 2,
+                    "description": "2 items • 2 shipments",
+                    "tracking_numbers": ["540576743144", "877829797830"],
+                    "shipments": [
+                        {
+                            "part_number": 1,
+                            "part_count": 2,
+                            "tracking_number": "540576743144",
+                            "carrier": "fedex",
+                            "status": "shipped",
+                            "expected_delivery": "2026-09-30",
+                            "item_count": 1,
+                            "description": "1 item",
+                        },
+                        {
+                            "part_number": 2,
+                            "part_count": 2,
+                            "tracking_number": "877829797830",
+                            "carrier": "fedex",
+                            "status": "shipped",
+                            "expected_delivery": "2026-10-01",
+                            "item_count": 1,
+                            "description": "1 item",
+                        },
+                    ],
+                }
+            },
+        )
+        == 0
+    )
+
+    first = registry.packages["540576743144"]["merchant"]
+    second = registry.packages["877829797830"]["merchant"]
+    assert first["expected_delivery"] == "2026-09-30"
+    assert first["part_number"] == 1
+    assert first["item_count"] == 1
+    assert second["expected_delivery"] == "2026-10-01"
+    assert second["part_number"] == 2
+    assert second["item_count"] == 1
+
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert "tracking_number" not in order
+    assert order["tracking_numbers"] == ["540576743144", "877829797830"]
+    assert len(order["shipments"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
+    """Carrier lifecycle should advance the matching shipment and aggregate order."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "shipped",
+                "shipments": [
+                    {
+                        "part_number": 1,
+                        "part_count": 2,
+                        "tracking_number": "540576743144",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                    },
+                    {
+                        "part_number": 2,
+                        "part_count": 2,
+                        "tracking_number": "877829797830",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                    },
+                ],
+            }
+        },
+    )
+    registry.register_package("540576743144", "fedex", "detected")
+    registry.enrich_package_merchant(
+        "540576743144",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 1,
+            "part_count": 2,
+            "status": "shipped",
+        },
+    )
+
+    assert registry.register_package(
+        "540576743144",
+        "fedex",
+        "out_for_delivery",
+        source="carrier_email",
+    )
+    assert registry.sync_tracking_status_to_merchant_order("540576743144")
+
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "out_for_delivery"
+    assert order["shipments"][0]["status"] == "out_for_delivery"
+    assert order["shipments"][1]["status"] == "shipped"
+    assert registry.packages["540576743144"]["merchant"]["status"] == "out_for_delivery"
+
+
+@pytest.mark.asyncio
+async def test_provider_not_found_does_not_override_confirmed_carrier_status(registry):
+    """17TRACK Not Found should not flag a carrier-confirmed active shipment."""
+    await registry.async_load()
+    registry.register_package(
+        "540576743144",
+        "fedex",
+        "out_for_delivery",
+        source="carrier_email",
+    )
+    registry.packages["540576743144"]["first_seen"] = (
+        datetime.now(UTC) - timedelta(hours=72)
+    ).isoformat()
+
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "540576743144", "status": "Not Found"}],
+    )
+
+    package = registry.get_packages_list()[0]
+    assert package["status"] == "out_for_delivery"
+    assert package["exception"] is False
+    assert package["awaiting_carrier_activation"] is False
+
+
+@pytest.mark.asyncio
 async def test_generic_merchant_order_can_attach_tracking(registry):
     """A pending Walmart order should accept manually retrieved carrier tracking."""
     await registry.async_load()

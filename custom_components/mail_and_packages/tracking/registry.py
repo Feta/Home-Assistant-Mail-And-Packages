@@ -84,6 +84,12 @@ class PackageRegistry:
     ) -> bool:
         """Return whether a provider status should surface as an exception."""
         if status_key == "not_found":
+            if package.get("carrier_confirmed") and package.get("status") in {
+                "in_transit",
+                "out_for_delivery",
+                "delivered",
+            }:
+                return False
             return cls._not_found_is_exception(package, now)
         return status_key in PROVIDER_EXCEPTION_STATUSES
 
@@ -488,21 +494,173 @@ class PackageRegistry:
         return changed_count, transitions
 
     @staticmethod
+    def _merchant_status_rank(status: Any) -> int:
+        """Return a monotonic lifecycle rank for merchant-order statuses."""
+        return {
+            "": 0,
+            "ordered": 0,
+            "pending": 0,
+            "awaiting_tracking": 0,
+            "shipped": 1,
+            "in_transit": 1,
+            "out_for_delivery": 2,
+            "delivered": 3,
+        }.get(str(status or "").lower(), 0)
+
+    @classmethod
     def _preserve_advanced_merchant_status(
+        cls,
         existing: dict[str, Any] | None,
         incoming: dict[str, Any],
     ) -> None:
-        """Prevent stale pre-tracking mail from downgrading an attached order."""
-        if not isinstance(existing, dict) or not existing.get("tracking_number"):
+        """Prevent older merchant mail from downgrading order or shipment state."""
+        if not isinstance(existing, dict):
             return
 
-        existing_status = str(existing.get("status") or "").lower()
-        incoming_status = str(incoming.get("status") or "").lower()
-        pending_statuses = {"", "ordered", "pending", "awaiting_tracking"}
-        advanced_statuses = {"shipped", "out_for_delivery", "delivered"}
-
-        if existing_status in advanced_statuses and incoming_status in pending_statuses:
+        existing_rank = cls._merchant_status_rank(existing.get("status"))
+        incoming_rank = cls._merchant_status_rank(incoming.get("status"))
+        if existing_rank > incoming_rank:
             incoming["status"] = existing.get("status")
+
+        existing_shipments = existing.get("shipments")
+        incoming_shipments = incoming.get("shipments")
+        if not isinstance(existing_shipments, list) or not isinstance(
+            incoming_shipments, list
+        ):
+            return
+
+        existing_by_tracking = {
+            cls.normalize_tracking_number(item.get("tracking_number", "")): item
+            for item in existing_shipments
+            if isinstance(item, dict) and item.get("tracking_number")
+        }
+        for shipment in incoming_shipments:
+            if not isinstance(shipment, dict):
+                continue
+            tracking = cls.normalize_tracking_number(
+                shipment.get("tracking_number", "")
+            )
+            previous = existing_by_tracking.get(tracking)
+            if not isinstance(previous, dict):
+                continue
+            if cls._merchant_status_rank(
+                previous.get("status")
+            ) > cls._merchant_status_rank(shipment.get("status")):
+                shipment["status"] = previous.get("status")
+
+    @staticmethod
+    def _merchant_order_fields() -> set[str]:
+        """Return persisted merchant-order metadata fields."""
+        return {
+            "name",
+            "image",
+            "status",
+            "expected_delivery",
+            "source_domain",
+            "item_count",
+            "description",
+            "tracking_number",
+            "tracking_numbers",
+            "carrier",
+            "shipments",
+        }
+
+    @staticmethod
+    def _filter_merchant_fields(
+        data: dict[str, Any] | None,
+        allowed: set[str],
+    ) -> dict[str, Any]:
+        """Return non-empty allowed merchant fields from one mapping."""
+        if not isinstance(data, dict):
+            return {}
+        return {
+            field: value
+            for field, value in data.items()
+            if field in allowed and value not in (None, "")
+        }
+
+    def _reconcile_one_merchant_order(
+        self,
+        merchant_name: str,
+        order_id: str,
+        metadata: dict[str, Any],
+        now: str,
+    ) -> bool:
+        """Merge one merchant-order update into persistent state."""
+        allowed = self._merchant_order_fields()
+        key = self._merchant_order_key(merchant_name, order_id)
+        existing = self._merchant_orders.get(key)
+        incoming = self._filter_merchant_fields(metadata, allowed)
+        self._preserve_advanced_merchant_status(existing, incoming)
+
+        merged = {
+            **self._filter_merchant_fields(existing, allowed),
+            **incoming,
+            "merchant": merchant_name,
+            "order_id": order_id,
+        }
+        incoming_shipments = incoming.get("shipments")
+        if isinstance(incoming_shipments, list) and len(incoming_shipments) > 1:
+            merged.pop("tracking_number", None)
+            merged.pop("carrier", None)
+
+        comparable_existing = (
+            {
+                field: value
+                for field, value in existing.items()
+                if field not in {"first_seen", "last_updated"}
+            }
+            if isinstance(existing, dict)
+            else {}
+        )
+        if comparable_existing == merged:
+            return False
+
+        first_seen = (
+            existing.get("first_seen", now) if isinstance(existing, dict) else now
+        )
+        self._merchant_orders[key] = {
+            **merged,
+            "first_seen": first_seen,
+            "last_updated": now,
+        }
+        return True
+
+    def _sync_one_package_merchant(
+        self,
+        tracking: str,
+        package: dict[str, Any],
+        merchant_name: str,
+        now: str,
+    ) -> bool:
+        """Synchronize one package's merchant snapshot from retained order data."""
+        package_merchant = package.get("merchant")
+        if not isinstance(package_merchant, dict):
+            return False
+
+        order_id = str(package_merchant.get("order_id") or "")
+        package_merchant_name = str(package_merchant.get("merchant") or "")
+        if not order_id or package_merchant_name.lower() != merchant_name.lower():
+            return False
+
+        key = self._merchant_order_key(merchant_name, order_id)
+        order = self._merchant_orders.get(key)
+        if not isinstance(order, dict):
+            return False
+
+        package_metadata = self._merchant_metadata_for_tracking(order, tracking)
+        existing_merchant = {
+            field: value
+            for field, value in package_merchant.items()
+            if value not in (None, "")
+        }
+        merged_merchant = {**existing_merchant, **package_metadata}
+        if merged_merchant == package_merchant:
+            return False
+
+        package["merchant"] = merged_merchant
+        package["last_updated"] = now
+        return True
 
     def reconcile_merchant_orders(
         self,
@@ -514,114 +672,195 @@ class PackageRegistry:
             return 0
 
         merchant_name = str(merchant).strip()
-        changed = 0
         now = datetime.now(UTC).isoformat()
-        allowed = {
-            "name",
-            "image",
-            "status",
-            "expected_delivery",
-            "source_domain",
-            "item_count",
-            "description",
-            "tracking_number",
-            "carrier",
+        changed = sum(
+            self._reconcile_one_merchant_order(
+                merchant_name,
+                str(order_id),
+                metadata,
+                now,
+            )
+            for order_id, metadata in orders.items()
+            if order_id and isinstance(metadata, dict)
+        )
+        changed += sum(
+            self._sync_one_package_merchant(
+                tracking,
+                package,
+                merchant_name,
+                now,
+            )
+            for tracking, package in self._packages.items()
+        )
+        return changed
+
+    @staticmethod
+    def _shipment_for_tracking(
+        order: dict[str, Any],
+        tracking_number: str,
+    ) -> dict[str, Any] | None:
+        """Return the shipment part matching one tracking number."""
+        tracking = PackageRegistry.normalize_tracking_number(tracking_number)
+        shipments = order.get("shipments")
+        if not isinstance(shipments, list):
+            return None
+        for shipment in shipments:
+            if not isinstance(shipment, dict):
+                continue
+            candidate = PackageRegistry.normalize_tracking_number(
+                shipment.get("tracking_number", "")
+            )
+            if candidate == tracking:
+                return shipment
+        return None
+
+    @classmethod
+    def _merchant_metadata_for_tracking(
+        cls,
+        order: dict[str, Any],
+        tracking_number: str,
+    ) -> dict[str, Any]:
+        """Build package-specific merchant metadata for a retained order."""
+        shipment = cls._shipment_for_tracking(order, tracking_number)
+        metadata: dict[str, Any] = {
+            "merchant": order.get("merchant"),
+            "order_id": order.get("order_id"),
         }
 
-        for order_id, metadata in orders.items():
-            if not order_id or not isinstance(metadata, dict):
-                continue
-
-            order_id_str = str(order_id)
-            key = self._merchant_order_key(merchant_name, order_id_str)
-            incoming = {
+        if shipment is not None:
+            for field in (
+                "status",
+                "expected_delivery",
+                "item_count",
+                "description",
+                "part_number",
+                "part_count",
+            ):
+                value = shipment.get(field)
+                if value not in (None, ""):
+                    metadata[field] = value
+            return {
                 field: value
                 for field, value in metadata.items()
-                if field in allowed and value not in (None, "")
-            }
-            existing = self._merchant_orders.get(key)
-            self._preserve_advanced_merchant_status(existing, incoming)
-
-            preserved = (
-                {
-                    field: value
-                    for field, value in existing.items()
-                    if field in allowed and value not in (None, "")
-                }
-                if isinstance(existing, dict)
-                else {}
-            )
-            merged = {
-                **preserved,
-                **incoming,
-                "merchant": merchant_name,
-                "order_id": order_id_str,
-            }
-            comparable_existing = (
-                {
-                    field: value
-                    for field, value in existing.items()
-                    if field not in ("first_seen", "last_updated")
-                }
-                if isinstance(existing, dict)
-                else {}
-            )
-            if comparable_existing == merged:
-                continue
-
-            first_seen = (
-                existing.get("first_seen", now) if isinstance(existing, dict) else now
-            )
-            self._merchant_orders[key] = {
-                **merged,
-                "first_seen": first_seen,
-                "last_updated": now,
-            }
-            changed += 1
-
-        # Keep package-level merchant metadata synchronized with richer order data.
-        for package in self._packages.values():
-            package_merchant = package.get("merchant")
-            if not isinstance(package_merchant, dict):
-                continue
-            order_id = str(package_merchant.get("order_id") or "")
-            package_merchant_name = str(package_merchant.get("merchant") or "")
-            if not order_id or package_merchant_name.lower() != merchant_name.lower():
-                continue
-            key = self._merchant_order_key(merchant_name, order_id)
-            order = self._merchant_orders.get(key)
-            if not order:
-                continue
-
-            package_metadata = {
-                field: value
-                for field, value in order.items()
-                if field
-                in {
-                    "merchant",
-                    "order_id",
-                    "name",
-                    "image",
-                    "expected_delivery",
-                    "status",
-                    "item_count",
-                    "description",
-                }
-                and value not in (None, "")
-            }
-            existing_merchant = {
-                field: value
-                for field, value in package_merchant.items()
                 if value not in (None, "")
             }
-            merged_merchant = {**existing_merchant, **package_metadata}
-            if merged_merchant == package_merchant:
-                continue
 
-            package["merchant"] = merged_merchant
+        for field in (
+            "name",
+            "image",
+            "expected_delivery",
+            "status",
+            "item_count",
+            "description",
+        ):
+            value = order.get(field)
+            if value not in (None, ""):
+                metadata[field] = value
+        return {
+            field: value for field, value in metadata.items() if value not in (None, "")
+        }
+
+    @staticmethod
+    def _merchant_status_for_package(package_status: str) -> str:
+        """Map package lifecycle to merchant-order lifecycle."""
+        return {
+            "delivered": "delivered",
+            "out_for_delivery": "out_for_delivery",
+        }.get(package_status, "shipped")
+
+    @classmethod
+    def _aggregate_shipment_status(cls, order: dict[str, Any]) -> str:
+        """Return aggregate merchant status from shipment-part states."""
+        shipments = [
+            item for item in order.get("shipments", []) if isinstance(item, dict)
+        ]
+        statuses = {str(item.get("status") or "shipped") for item in shipments}
+        if shipments and statuses == {"delivered"}:
+            return "delivered"
+        if "out_for_delivery" in statuses:
+            return "out_for_delivery"
+        return "shipped"
+
+    def _advance_order_for_tracking(
+        self,
+        order: dict[str, Any],
+        tracking: str,
+        order_status: str,
+    ) -> bool:
+        """Advance the matching shipment or legacy single-tracking order."""
+        shipment = self._shipment_for_tracking(order, tracking)
+        if shipment is not None:
+            current = str(shipment.get("status") or "shipped")
+            changed = False
+            if self._merchant_status_rank(order_status) > self._merchant_status_rank(
+                current
+            ):
+                shipment["status"] = order_status
+                changed = True
+
+            aggregate_status = self._aggregate_shipment_status(order)
+            if order.get("status") != aggregate_status:
+                order["status"] = aggregate_status
+                changed = True
+            return changed
+
+        if order.get("tracking_number") != tracking:
+            return False
+        current = str(order.get("status") or "")
+        if self._merchant_status_rank(order_status) <= self._merchant_status_rank(
+            current
+        ):
+            return False
+        order["status"] = order_status
+        return True
+
+    def _linked_order_for_package(
+        self,
+        package: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return the retained order referenced by a package merchant snapshot."""
+        merchant_data = package.get("merchant")
+        if not isinstance(merchant_data, dict):
+            return None
+
+        merchant = str(merchant_data.get("merchant") or "").strip()
+        order_id = str(merchant_data.get("order_id") or "").strip()
+        if not merchant or not order_id:
+            return None
+
+        key = self._merchant_order_key(merchant, order_id)
+        order = self._merchant_orders.get(key)
+        return order if isinstance(order, dict) else None
+
+    def sync_tracking_status_to_merchant_order(self, tracking_number: str) -> bool:
+        """Propagate package lifecycle into its linked merchant order/shipment."""
+        tracking = self.normalize_tracking_number(tracking_number)
+        package = self._packages.get(tracking)
+        if not isinstance(package, dict) or package.get("status") == "cleared":
+            return False
+
+        order = self._linked_order_for_package(package)
+        if order is None:
+            return False
+
+        package_status = str(package.get("status") or "detected")
+        order_status = self._merchant_status_for_package(package_status)
+        changed = self._advance_order_for_tracking(order, tracking, order_status)
+
+        package_metadata = self._merchant_metadata_for_tracking(order, tracking)
+        existing_merchant = package.get("merchant")
+        merged = {
+            **(existing_merchant if isinstance(existing_merchant, dict) else {}),
+            **package_metadata,
+        }
+        if merged != existing_merchant:
+            package["merchant"] = merged
+            changed = True
+
+        if changed:
+            now = datetime.now(UTC).isoformat()
             package["last_updated"] = now
-            changed += 1
-
+            order["last_updated"] = now
         return changed
 
     def reconcile_amazon_orders(
@@ -655,6 +894,8 @@ class PackageRegistry:
                 "status",
                 "item_count",
                 "description",
+                "part_number",
+                "part_count",
             }
             and value not in (None, "")
         }
@@ -747,6 +988,8 @@ class PackageRegistry:
                 "status",
                 "item_count",
                 "description",
+                "part_number",
+                "part_count",
             }
             and value not in (None, "")
         }
@@ -930,6 +1173,14 @@ class PackageRegistry:
                 continue
             tracking_provider = package.get("tracking_provider")
             provider_exception = bool(package.get("provider_exception", False))
+            if (
+                isinstance(tracking_provider, dict)
+                and tracking_provider.get("status_key") == "not_found"
+                and package.get("carrier_confirmed")
+                and status in {"in_transit", "out_for_delivery", "delivered"}
+            ):
+                tracking_provider = None
+                provider_exception = False
             result.append(
                 {
                     "tracking_number": tracking,
@@ -939,7 +1190,8 @@ class PackageRegistry:
                         package.get("exception", False) or provider_exception
                     ),
                     "awaiting_carrier_activation": bool(
-                        isinstance(tracking_provider, dict)
+                        status == "detected"
+                        and isinstance(tracking_provider, dict)
                         and tracking_provider.get("status_key") == "not_found"
                         and not provider_exception
                     ),

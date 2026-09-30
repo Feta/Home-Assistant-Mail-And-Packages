@@ -2,6 +2,18 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b5 - 2026-09-30
+
+### Live mail parsing
+
+- Treat trusted carrier-authored status emails as lifecycle evidence so direct FedEx/UPS/USPS/DHL updates can advance packages even when 17TRACK is stale or reports `Not Found`.
+- Suppress stale provider `Not Found` metadata after a carrier-confirmed package has advanced to in transit, out for delivery, or delivered.
+- Require UPS/shipping context before accepting `1Z...` values, preventing tracking-shaped tokens inside unrelated URLs from becoming packages.
+- Parse Walmart split shipments into per-part tracking records with their own expected-delivery dates, item counts, and part numbers while retaining one aggregate merchant order.
+- Keep merchant-order and shipment lifecycle states monotonic when older emails are rescanned.
+- Enrich Amazon shipment records with item counts and common relative arrival dates such as `Arriving Thursday`.
+- Bump the universal scanner UID generation so recent shipping mail is reparsed with the corrected logic.
+
 ## 0.8.0b4 - 2026-09-28
 
 ### Fixes
