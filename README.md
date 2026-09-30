@@ -9,7 +9,7 @@
 
 ## About this fork
 
-**Current beta:** `0.8.0b4`
+**Current beta:** `0.8.0b5`
 
 The original **Mail and Packages** integration connects to your email account and creates Home Assistant sensors for mail and package activity. This fork preserves that functionality while adding an optional, persistent package-tracking pipeline designed to keep package history and tracking metadata useful beyond a single day's email scan.
 
