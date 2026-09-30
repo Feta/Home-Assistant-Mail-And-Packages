@@ -494,7 +494,10 @@ class PackageRegistry:
             new_value = {
                 **activation,
                 "state": "timed_out" if provider_exception else "awaiting",
-                "first_seen": activation.get("first_seen", now),
+                "first_seen": activation.get(
+                    "first_seen",
+                    package.get("first_seen", now),
+                ),
                 "last_checked": now,
                 "check_count": int(activation.get("check_count", 0)) + 1,
             }
@@ -719,9 +722,34 @@ class PackageRegistry:
         allowed = self._merchant_order_fields()
         key = self._merchant_order_key(merchant_name, order_id)
         existing = self._merchant_orders.get(key)
-        if existing is None and key in self._archived_merchant_orders:
-            return False
         incoming = self._filter_merchant_fields(metadata, allowed)
+        archived = self._archived_merchant_orders.get(key)
+        if existing is None and isinstance(archived, dict):
+            archived_tracking = {
+                self.normalize_tracking_number(value)
+                for value in [
+                    archived.get("tracking_number"),
+                    *(archived.get("tracking_numbers") or []),
+                ]
+                if value
+            }
+            incoming_tracking = {
+                self.normalize_tracking_number(value)
+                for value in [
+                    incoming.get("tracking_number"),
+                    *(incoming.get("tracking_numbers") or []),
+                ]
+                if value
+            }
+            should_reopen = (
+                self._merchant_status_rank(incoming.get("status"))
+                > self._merchant_status_rank(archived.get("status"))
+                or bool(incoming_tracking - archived_tracking)
+            )
+            if not should_reopen:
+                return False
+            existing = self._archived_merchant_orders.pop(key)
+
         self._preserve_advanced_merchant_status(existing, incoming)
 
         merged = {
