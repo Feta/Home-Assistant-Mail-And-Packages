@@ -11,7 +11,7 @@ import html
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr, parsedate_to_datetime
@@ -246,11 +246,11 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
         }
         target = weekdays[match.group(1).lower()]
         delta = (target - sent.weekday()) % 7
-        return (sent + __import__("datetime").timedelta(days=delta)).isoformat()
+        return (sent + timedelta(days=delta)).isoformat()
 
     lower = body.lower()
     if "arriving tomorrow" in lower:
-        return (sent + __import__("datetime").timedelta(days=1)).isoformat()
+        return (sent + timedelta(days=1)).isoformat()
     if "arriving today" in lower:
         return sent.isoformat()
     return None
@@ -306,6 +306,7 @@ def _amazon_merchant_metadata(
         metadata["expected_delivery"] = expected
 
     return metadata
+
 
 def _message_datetime(message: Any) -> datetime:
     """Return the message timestamp or current UTC time when unavailable."""
