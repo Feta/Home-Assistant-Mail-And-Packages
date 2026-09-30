@@ -318,6 +318,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         await self.registry.async_load()
         transitions = self.registry.reconcile_tracking_details(tracking_details)
         amazon_changes = self.registry.reconcile_amazon_orders(amazon_orders or {})
+        linked_status_changes = self.registry.reconcile_linked_package_statuses()
         expired = self.registry.auto_expire(
             delivered_days=self.config.get(
                 CONF_REGISTRY_DELIVERED_DAYS,
@@ -330,7 +331,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         )
         data.update(self.registry.coordinator_data())
 
-        if transitions or amazon_changes or expired:
+        if transitions or amazon_changes or linked_status_changes or expired:
             await self.registry.async_save()
 
         for transition in transitions:
@@ -415,6 +416,9 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                             list(snapshot.packages),
                         )
                     )
+                linked_status_changes = (
+                    self.registry.reconcile_linked_package_statuses()
+                )
 
                 forwarding_result = await async_forward_pending_to_seventeentrack(
                     self.hass,
@@ -432,7 +436,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         forwarding_changes = (
             forwarding_result.forwarded + forwarding_result.existing_remote
         )
-        if provider_changes or forwarding_changes:
+        if provider_changes or linked_status_changes or forwarding_changes:
             data.update(self.registry.coordinator_data())
             await self.registry.async_save()
 
