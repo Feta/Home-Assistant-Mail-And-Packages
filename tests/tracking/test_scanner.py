@@ -356,7 +356,7 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     """A successful scan should register packages and persist UID dedupe state."""
     cache = MagicMock()
     cache.fetch = AsyncMock(
-        return_value=("OK", [_message("Track package 1Z999AA10123456784")])
+        return_value=("OK", [_message("Track your UPS package 1Z999AA10123456784")])
     )
 
     with patch(
@@ -539,7 +539,7 @@ async def test_scan_timeout_preserves_partial_progress(registry, account):
 
     async def _fetch(email_id, *args, **kwargs):
         if email_id == b"1":
-            return ("OK", [_message("Track package 1Z999AA10123456784")])
+            return ("OK", [_message("Track your UPS package 1Z999AA10123456784")])
         await asyncio.sleep(0.05)
         return ("OK", [_message("Track package TBA123456789012")])
 
@@ -574,7 +574,7 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
     registry.clear_package("1Z999AA10123456784")
     cache = MagicMock()
     cache.fetch = AsyncMock(
-        return_value=("OK", [_message("Track package 1Z999AA10123456784")])
+        return_value=("OK", [_message("Track your UPS package 1Z999AA10123456784")])
     )
 
     with patch(
