@@ -795,7 +795,7 @@ async def test_archived_merchant_order_reopens_only_for_meaningful_updates(regis
             }
         },
     )
-    key = "amazon:111-2222222-3333333"
+    key = "111-2222222-3333333"
     registry.merchant_orders[key]["last_updated"] = (
         datetime.now(UTC) - timedelta(days=4)
     ).isoformat()
