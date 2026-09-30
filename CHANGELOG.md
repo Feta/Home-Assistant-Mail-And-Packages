@@ -2,6 +2,15 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b8 - 2026-09-30
+
+### Linked package/order self-healing
+
+- Reconcile every active package's current lifecycle back into its linked merchant shipment during normal registry refreshes.
+- Re-run linked-order reconciliation immediately after 17TRACK/provider enrichment so provider-driven lifecycle changes cannot leave merchant shipment metadata stale.
+- Repair persisted split-order drift automatically after restart or upgrade without requiring the original merchant email to be processed again.
+- Add regression coverage for both normal registry refresh and tracking-provider refresh paths.
+
 ## 0.8.0b7 - 2026-09-30
 
 ### Lifecycle and order reconciliation

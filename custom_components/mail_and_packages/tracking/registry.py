@@ -1059,6 +1059,14 @@ class PackageRegistry:
             order["last_updated"] = now
         return changed
 
+    def reconcile_linked_package_statuses(self) -> int:
+        """Repair lifecycle drift between active packages and linked merchant orders."""
+        changed = 0
+        for tracking_number in tuple(self._packages):
+            if self.sync_tracking_status_to_merchant_order(tracking_number):
+                changed += 1
+        return changed
+
     def reconcile_amazon_orders(
         self,
         orders: dict[str, dict[str, Any]],
