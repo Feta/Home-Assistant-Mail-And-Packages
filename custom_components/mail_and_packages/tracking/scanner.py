@@ -625,6 +625,7 @@ def _has_context(
     start: int,
     end: int,
     pattern: TrackingPattern,
+    merchant_context: bool = False,
 ) -> bool:
     """Require carrier and shipping context for ambiguous numeric formats."""
     left = max(0, start - TRACKING_CONTEXT_WINDOW)
@@ -636,10 +637,13 @@ def _has_context(
     carrier_header = any(hint in header_lower for hint in pattern.carrier_hints)
 
     # 1Z-shaped values can appear inside unrelated opaque tokens. Generic
-    # words such as "package" or "delivery" are not enough: require actual UPS
-    # evidence either near the value or in the sender/subject header too.
+    # words such as "package" or "delivery" are not enough on their own.
+    # Accept explicit UPS evidence or a recognized merchant message that
+    # genuinely exposes a shipment/tracking value.
     if pattern.carrier == "ups":
-        return local_shipping and (carrier_nearby or carrier_header)
+        return local_shipping and (
+            carrier_nearby or carrier_header or merchant_context
+        )
 
     if carrier_nearby and local_shipping:
         return True
@@ -696,6 +700,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
                 match.start(1),
                 match.end(1),
                 pattern,
+                merchant_context=merchant is not None,
             ):
                 continue
 
