@@ -517,9 +517,9 @@ class PackageRegistry:
         if not isinstance(existing, dict):
             return
 
-        if cls._merchant_status_rank(existing.get("status")) > cls._merchant_status_rank(
-            incoming.get("status")
-        ):
+        existing_rank = cls._merchant_status_rank(existing.get("status"))
+        incoming_rank = cls._merchant_status_rank(incoming.get("status"))
+        if existing_rank > incoming_rank:
             incoming["status"] = existing.get("status")
 
         existing_shipments = existing.get("shipments")
@@ -687,7 +687,7 @@ class PackageRegistry:
         order: dict[str, Any],
         tracking_number: str,
     ) -> dict[str, Any]:
-        """Build merchant metadata without flattening a split order onto each package."""
+        """Build package-specific merchant metadata for a retained order."""
         shipment = cls._shipment_for_tracking(order, tracking_number)
         metadata: dict[str, Any] = {
             "merchant": order.get("merchant"),
