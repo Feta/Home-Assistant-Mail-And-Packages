@@ -662,9 +662,9 @@ class PackageRegistry:
             "shipped": 1,
             "in_transit": 2,
             "partially_out_for_delivery": 3,
-            "out_for_delivery": 3,
-            "partially_delivered": 4,
-            "delivered": 5,
+            "out_for_delivery": 4,
+            "partially_delivered": 5,
+            "delivered": 6,
         }.get(str(status or "").lower(), 0)
 
     @classmethod
