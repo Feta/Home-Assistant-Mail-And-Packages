@@ -782,6 +782,64 @@ async def test_auto_expire(registry):
 
 
 @pytest.mark.asyncio
+async def test_archived_merchant_order_reopens_only_for_meaningful_updates(registry):
+    """Archived orders should ignore stale mail but accept new shipment evidence."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Amazon",
+        {
+            "111-2222222-3333333": {
+                "status": "delivered",
+                "tracking_number": "TRACK-A",
+                "carrier": "ups",
+            }
+        },
+    )
+    key = "amazon:111-2222222-3333333"
+    registry.merchant_orders[key]["last_updated"] = (
+        datetime.now(UTC) - timedelta(days=4)
+    ).isoformat()
+
+    assert registry.auto_expire() == 1
+    assert key not in registry.merchant_orders
+    assert key in registry.archived_merchant_orders
+
+    assert (
+        registry.reconcile_merchant_orders(
+            "Amazon",
+            {
+                "111-2222222-3333333": {
+                    "status": "shipped",
+                    "tracking_number": "TRACK-A",
+                    "carrier": "ups",
+                }
+            },
+        )
+        == 0
+    )
+    assert key in registry.archived_merchant_orders
+
+    assert (
+        registry.reconcile_merchant_orders(
+            "Amazon",
+            {
+                "111-2222222-3333333": {
+                    "status": "delivered",
+                    "tracking_numbers": ["TRACK-A", "TRACK-B"],
+                }
+            },
+        )
+        == 1
+    )
+    assert key in registry.merchant_orders
+    assert key not in registry.archived_merchant_orders
+    assert registry.merchant_orders[key]["tracking_numbers"] == [
+        "TRACK-A",
+        "TRACK-B",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_manual_mark_and_clear(registry):
     """Manual lifecycle actions should update package state."""
     await registry.async_load()
