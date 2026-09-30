@@ -861,15 +861,16 @@ def _register_message_candidates(
         if registry.sync_tracking_status_to_merchant_order(candidate.tracking_number):
             result.state_changed = True
         if was_new and changed:
-            result.detected.append(
-                {
-                    "tracking_number": candidate.tracking_number,
-                    "carrier": candidate.carrier,
-                    "status": candidate.status,
-                    "previous_status": "",
-                    "source": candidate.source,
-                }
-            )
+            event = {
+                "tracking_number": candidate.tracking_number,
+                "carrier": candidate.carrier,
+                "status": candidate.status,
+                "previous_status": "",
+                "source": candidate.source,
+            }
+            result.detected.append(event)
+            if candidate.status != "detected":
+                result.transitions.append(event)
         elif (
             changed
             and candidate.status != "detected"
