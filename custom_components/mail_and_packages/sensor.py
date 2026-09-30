@@ -215,6 +215,14 @@ class RegistrySensor(PackagesSensor):
     def extra_state_attributes(self) -> dict:
         """Return package records for this registry view."""
         data = self.coordinator.data or {}
+        if self.type == "registry_health":
+            return data.get("registry_health_data", {})
+        if self.type == "registry_archived":
+            return {
+                "packages": data.get("registry_archived_list", []),
+                "merchant_orders": data.get("registry_archived_orders_list", []),
+            }
+
         attr_key = {
             "registry_tracked": "registry_packages_list",
             "registry_in_transit": "registry_in_transit_list",

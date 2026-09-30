@@ -14,7 +14,7 @@ from .entity import MailandPackagesBinarySensorEntityDescription
 DOMAIN = "mail_and_packages"
 DOMAIN_DATA = f"{DOMAIN}_data"
 ASSET_ROOT: Final[Path] = Path(__file__).parent
-VERSION = "0.8.0b6"
+VERSION = "0.8.0b7"
 ISSUE_URL = "https://github.com/Feta/Home-Assistant-Mail-And-Packages/issues"
 PLATFORM = "sensor"
 PLATFORMS = ["binary_sensor", "camera", "sensor"]
@@ -167,6 +167,8 @@ REGISTRY_SENSOR_KEYS: Final[tuple[str, ...]] = (
     "registry_tracked",
     "registry_in_transit",
     "registry_delivered",
+    "registry_archived",
+    "registry_health",
 )
 
 # Amazon
@@ -1408,6 +1410,18 @@ SENSOR_TYPES: Final[dict[str, SensorEntityDescription]] = {
         native_unit_of_measurement="package(s)",
         icon="mdi:package-variant-closed-check",
         key="registry_delivered",
+    ),
+    "registry_archived": SensorEntityDescription(
+        name="Mail Registry Archived",
+        native_unit_of_measurement="package(s)",
+        icon="mdi:archive-outline",
+        key="registry_archived",
+    ),
+    "registry_health": SensorEntityDescription(
+        name="Mail Registry Health",
+        icon="mdi:heart-pulse",
+        key="registry_health",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     # USPS
     "usps_mail": SensorEntityDescription(

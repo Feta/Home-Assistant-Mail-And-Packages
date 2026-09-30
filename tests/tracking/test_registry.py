@@ -124,6 +124,8 @@ async def test_counts_and_coordinator_data(registry):
     assert data["registry_tracked"] == 3
     assert data["registry_in_transit"] == 2
     assert data["registry_delivered"] == 1
+    assert data["registry_archived"] == 0
+    assert data["registry_health"] == "healthy"
     assert len(data["registry_packages_list"]) == 3
 
 
@@ -491,10 +493,145 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
     assert registry.sync_tracking_status_to_merchant_order("540576743144")
 
     order = registry.get_merchant_orders_list("Walmart")[0]
-    assert order["status"] == "out_for_delivery"
+    assert order["status"] == "partially_out_for_delivery"
     assert order["shipments"][0]["status"] == "out_for_delivery"
     assert order["shipments"][1]["status"] == "shipped"
     assert registry.packages["540576743144"]["merchant"]["status"] == "out_for_delivery"
+
+    registry.register_package("877829797830", "fedex", "detected")
+    registry.enrich_package_merchant(
+        "877829797830",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 2,
+            "part_count": 2,
+            "status": "shipped",
+        },
+    )
+    assert registry.register_package(
+        "877829797830",
+        "fedex",
+        "out_for_delivery",
+        source="carrier_email",
+    )
+    assert registry.sync_tracking_status_to_merchant_order("877829797830")
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "out_for_delivery"
+
+
+@pytest.mark.asyncio
+async def test_multi_shipment_aggregate_tracks_partial_delivery(registry):
+    """Split orders should distinguish partial delivery from full delivery."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "ORDER-1": {
+                "status": "shipped",
+                "shipments": [
+                    {
+                        "tracking_number": "TRACK-A",
+                        "carrier": "ups",
+                        "status": "shipped",
+                    },
+                    {
+                        "tracking_number": "TRACK-B",
+                        "carrier": "ups",
+                        "status": "shipped",
+                    },
+                ],
+            }
+        },
+    )
+    for tracking in ("TRACK-A", "TRACK-B"):
+        registry.register_package(tracking, "ups", "detected")
+        registry.enrich_package_merchant(
+            tracking,
+            {
+                "merchant": "Walmart",
+                "order_id": "ORDER-1",
+                "status": "shipped",
+            },
+        )
+
+    registry.register_package(
+        "TRACK-A",
+        "ups",
+        "delivered",
+        source="carrier_email",
+    )
+    assert registry.sync_tracking_status_to_merchant_order("TRACK-A")
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "partially_delivered"
+
+    registry.register_package(
+        "TRACK-B",
+        "ups",
+        "delivered",
+        source="carrier_email",
+    )
+    assert registry.sync_tracking_status_to_merchant_order("TRACK-B")
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_overdue_orders_surface_in_health_summary(registry):
+    """Past expected dates should be visible without inventing a delivery outcome."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Amazon",
+        {
+            "111-1111111-1111111": {
+                "status": "shipped",
+                "expected_delivery": "2000-01-01",
+                "item_count": 1,
+            }
+        },
+    )
+
+    order = registry.get_merchant_orders_list("Amazon")[0]
+    assert order["status"] == "shipped"
+    assert order["overdue"] is True
+    assert order["days_overdue"] > 0
+
+    health = registry.get_health_summary()
+    assert health["state"] == "attention"
+    assert health["overdue_orders"] == 1
+
+
+@pytest.mark.asyncio
+async def test_package_source_provenance_is_unique(registry):
+    """Multiple source messages should enrich one package instead of duplicating it."""
+    await registry.async_load()
+    assert registry.register_package(
+        "1ZSOURCE",
+        "ups",
+        source="universal_scan",
+        source_from="store.example",
+        source_id="<message-1@example>",
+    )
+    assert not registry.register_package(
+        "1ZSOURCE",
+        "ups",
+        source="universal_scan",
+        source_from="store.example",
+        source_id="<message-1@example>",
+    )
+    assert registry.register_package(
+        "1ZSOURCE",
+        "ups",
+        "in_transit",
+        source="carrier_email",
+        source_from="ups.com",
+        source_id="<message-2@example>",
+    )
+
+    sources = registry.packages["1ZSOURCE"]["sources"]
+    assert len(sources) == 2
+    assert sources[0]["source_id"] == "<message-1@example>"
+    assert sources[1]["source_id"] == "<message-2@example>"
 
 
 @pytest.mark.asyncio
@@ -593,6 +730,8 @@ async def test_provider_not_found_has_grace_period(registry):
     package = registry.get_packages_list()[0]
     assert package["exception"] is False
     assert package["awaiting_carrier_activation"] is True
+    assert package["carrier_activation"]["state"] == "awaiting"
+    assert package["carrier_activation"]["check_count"] == 1
 
     registry.packages["9400111899560000000000"]["first_seen"] = (
         datetime.now(UTC) - timedelta(hours=49)
@@ -606,11 +745,13 @@ async def test_provider_not_found_has_grace_period(registry):
     package = registry.get_packages_list()[0]
     assert package["exception"] is True
     assert package["awaiting_carrier_activation"] is False
+    assert package["carrier_activation"]["state"] == "timed_out"
+    assert package["carrier_activation"]["check_count"] == 2
 
 
 @pytest.mark.asyncio
 async def test_auto_expire(registry):
-    """Expired delivered, detected, and cleared records should be removed."""
+    """Expired completed records should archive while false detections are removed."""
     await registry.async_load()
     registry.register_package("DELIVERED", "ups", "delivered")
     registry.register_package("DETECTED", "ups", "detected")
@@ -629,6 +770,73 @@ async def test_auto_expire(registry):
 
     assert registry.auto_expire() == 3
     assert registry.packages == {}
+    assert set(registry.archived_packages) == {"DELIVERED", "CLEARED"}
+    assert "DETECTED" not in registry.archived_packages
+
+    # Archive records continue to suppress rediscovery, while manual add is
+    # an explicit override for a genuinely reused tracking number.
+    assert not registry.register_package("DELIVERED", "ups", "in_transit")
+    assert registry.add_package("DELIVERED", "ups")
+    assert "DELIVERED" in registry.packages
+    assert "DELIVERED" not in registry.archived_packages
+
+
+@pytest.mark.asyncio
+async def test_archived_merchant_order_reopens_only_for_meaningful_updates(registry):
+    """Archived orders should ignore stale mail but accept new shipment evidence."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Amazon",
+        {
+            "111-2222222-3333333": {
+                "status": "delivered",
+                "tracking_number": "TRACK-A",
+                "carrier": "ups",
+            }
+        },
+    )
+    key = "111-2222222-3333333"
+    registry.merchant_orders[key]["last_updated"] = (
+        datetime.now(UTC) - timedelta(days=4)
+    ).isoformat()
+
+    assert registry.auto_expire() == 1
+    assert key not in registry.merchant_orders
+    assert key in registry.archived_merchant_orders
+
+    assert (
+        registry.reconcile_merchant_orders(
+            "Amazon",
+            {
+                "111-2222222-3333333": {
+                    "status": "shipped",
+                    "tracking_number": "TRACK-A",
+                    "carrier": "ups",
+                }
+            },
+        )
+        == 0
+    )
+    assert key in registry.archived_merchant_orders
+
+    assert (
+        registry.reconcile_merchant_orders(
+            "Amazon",
+            {
+                "111-2222222-3333333": {
+                    "status": "delivered",
+                    "tracking_numbers": ["TRACK-A", "TRACK-B"],
+                }
+            },
+        )
+        == 1
+    )
+    assert key in registry.merchant_orders
+    assert key not in registry.archived_merchant_orders
+    assert registry.merchant_orders[key]["tracking_numbers"] == [
+        "TRACK-A",
+        "TRACK-B",
+    ]
 
 
 @pytest.mark.asyncio

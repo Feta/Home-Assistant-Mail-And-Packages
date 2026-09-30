@@ -107,6 +107,7 @@ class TrackingCandidate:
     merchant: dict[str, Any] | None = None
     status: str = "detected"
     source: str = "universal_scan"
+    source_id: str = ""
 
 
 @dataclass(slots=True)
@@ -664,6 +665,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
     search_text = f"{subject}\n{body}"
     text_lower = search_text.lower()
     header_lower = f"{sender_domain} {subject}".lower()
+    source_id = str(message.get("Message-ID") or "").strip()
     merchant = _amazon_merchant_metadata(
         message,
         subject,
@@ -721,6 +723,7 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
                     source=(
                         "carrier_email" if lifecycle is not None else "universal_scan"
                     ),
+                    source_id=source_id,
                 )
             )
 
@@ -843,6 +846,7 @@ def _register_message_candidates(
             source=candidate.source,
             source_from=candidate.source_domain,
             description="Detected from configured shipping mail",
+            source_id=candidate.source_id,
         )
         if changed:
             result.state_changed = True

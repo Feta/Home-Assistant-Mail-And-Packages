@@ -2,6 +2,22 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b7 - 2026-09-30
+
+### Lifecycle and order reconciliation
+
+- Distinguish partial multi-shipment states from whole-order states so one out-for-delivery or delivered shipment no longer overstates the parent order.
+- Archive delivered and manually cleared package records after their retention window instead of deleting them, preserving package history and automatic deduplication.
+- Allow an archived merchant order to reopen only when a later update is meaningfully newer, such as a newly discovered tracking number or more advanced status.
+- Mark merchant orders overdue when their expected-delivery date has passed without inventing a delivered or lost outcome.
+
+### Tracking diagnostics
+
+- Track carrier-label activation checks with first-seen, last-checked, check-count, and activation/timed-out state.
+- Retain unique package source provenance, including RFC822 Message-ID when available, so multiple related emails enrich one package record.
+- Add Mail Registry Archived and Mail Registry Health sensors with diagnostic counts for active, pending, archived, overdue, activation-waiting, and exception records.
+- Remove the redundant Pillow manifest requirement now that Home Assistant provides it directly.
+
 ## 0.8.0b6 - 2026-09-30
 
 ### Tracking accuracy
