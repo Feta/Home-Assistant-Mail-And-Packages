@@ -224,25 +224,7 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
     sent = _message_datetime(message).date()
 
     if match := AMAZON_ARRIVING_DATE_PATTERN.search(body):
-        month = _month_number(match.group(1))
-        if month is not None:
-            try:
-                candidate = datetime(sent.year, month, int(match.group(2)), tzinfo=UTC)
-            except ValueError:
-                candidate = None
-            if candidate is not None:
-                sent_midnight = datetime.combine(
-                    sent,
-                    datetime.min.time(),
-                    tzinfo=UTC,
-                )
-                if (sent_midnight - candidate).days > 180:
-                    try:
-                        candidate = candidate.replace(year=sent.year + 1)
-                    except ValueError:
-                        candidate = None
-                if candidate is not None:
-                    return candidate.date().isoformat()
+        return _date_from_month_day(message, match.group(1), match.group(2))
 
     if match := AMAZON_ARRIVING_WEEKDAY_PATTERN.search(body):
         weekdays = {
@@ -255,8 +237,7 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
             "sunday": 6,
         }
         target = weekdays[match.group(1).lower()]
-        delta = (target - sent.weekday()) % 7
-        return (sent + timedelta(days=delta)).isoformat()
+        return (sent + timedelta(days=(target - sent.weekday()) % 7)).isoformat()
 
     lower = body.lower()
     if "arriving tomorrow" in lower:
@@ -265,6 +246,37 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
         return sent.isoformat()
     return None
 
+
+def _amazon_status(subject: str, message: Any) -> str | None:
+    """Map common Amazon subjects/senders to a merchant-order lifecycle."""
+    lower_subject = subject.lower()
+    if "out for delivery" in lower_subject:
+        return "out_for_delivery"
+    if lower_subject.startswith("delivered"):
+        return "delivered"
+    sender = str(message.get("From", "")).lower()
+    if lower_subject.startswith("shipped") or "shipment-tracking@" in sender:
+        return "shipped"
+    if lower_subject.startswith("ordered"):
+        return "ordered"
+    return None
+
+
+def _item_count_metadata(
+    pattern: re.Pattern[str],
+    text: str,
+) -> dict[str, Any]:
+    """Return item count and display text using the largest count in a message."""
+    counts = [int(found.group(1)) for found in pattern.finditer(text)]
+    if not counts:
+        return {}
+    item_count = max(counts)
+    return {
+        "item_count": item_count,
+        "description": (
+            f"{item_count} item" if item_count == 1 else f"{item_count} items"
+        ),
+    }
 
 def _amazon_merchant_metadata(
     message: Any,
@@ -277,44 +289,23 @@ def _amazon_merchant_metadata(
         return None
 
     combined = f"{subject}\n{body}"
-    match = AMAZON_ORDER_PATTERN.search(combined)
+    order_match = AMAZON_ORDER_PATTERN.search(combined)
     details = extract_amazon_order_details(subject, body, message) or {}
-    if not match and not details:
+    if not order_match and not details:
         return None
 
-    metadata: dict[str, Any] = {"merchant": "Amazon"}
-    if match:
-        metadata["order_id"] = match.group(0)
-    for key in ("name", "image"):
-        value = details.get(key)
-        if value:
-            metadata[key] = value
+    metadata: dict[str, Any] = {
+        "merchant": "Amazon",
+        **{key: value for key, value in details.items() if value},
+    }
+    if order_match:
+        metadata["order_id"] = order_match.group(0)
+    if status := _amazon_status(subject, message):
+        metadata["status"] = status
 
-    lower_subject = subject.lower()
-    if "out for delivery" in lower_subject:
-        metadata["status"] = "out_for_delivery"
-    elif lower_subject.startswith("delivered"):
-        metadata["status"] = "delivered"
-    elif lower_subject.startswith("shipped") or "shipment-tracking@" in str(
-        message.get("From", "")
-    ).lower():
-        metadata["status"] = "shipped"
-    elif lower_subject.startswith("ordered"):
-        metadata["status"] = "ordered"
-
-    item_counts = [
-        int(found.group(1)) for found in AMAZON_ITEM_COUNT_PATTERN.finditer(combined)
-    ]
-    if item_counts:
-        item_count = max(item_counts)
-        metadata["item_count"] = item_count
-        metadata["description"] = (
-            f"{item_count} item" if item_count == 1 else f"{item_count} items"
-        )
-
+    metadata.update(_item_count_metadata(AMAZON_ITEM_COUNT_PATTERN, combined))
     if expected := _amazon_expected_delivery(message, combined):
         metadata["expected_delivery"] = expected
-
     return metadata
 
 
@@ -421,6 +412,68 @@ def _walmart_shipments(message: Any, body: str) -> list[dict[str, Any]]:
     )
 
 
+def _walmart_status(combined: str) -> str:
+    """Map Walmart mail wording to a merchant-order lifecycle."""
+    lower = combined.lower()
+    if "delivered" in lower or "arrived:" in lower:
+        return "delivered"
+    if "out for delivery" in lower:
+        return "out_for_delivery"
+    if "let you know when" in lower and "on the way" in lower:
+        return "awaiting_tracking"
+    if "shipped" in lower or "on the way" in lower:
+        return "shipped"
+    return "awaiting_tracking"
+
+
+def _walmart_shipment_summary(shipments: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build order-level summary fields from parsed Walmart shipment parts."""
+    metadata: dict[str, Any] = {
+        "shipments": shipments,
+        "tracking_numbers": [
+            shipment["tracking_number"] for shipment in shipments
+        ],
+    }
+
+    expected_dates = [
+        shipment["expected_delivery"]
+        for shipment in shipments
+        if shipment.get("expected_delivery")
+    ]
+    if expected_dates:
+        metadata["expected_delivery"] = max(expected_dates)
+
+    item_counts = [
+        int(shipment["item_count"])
+        for shipment in shipments
+        if shipment.get("item_count") is not None
+    ]
+    if item_counts:
+        item_count = sum(item_counts)
+        item_label = (
+            f"{item_count} item" if item_count == 1 else f"{item_count} items"
+        )
+        metadata["item_count"] = item_count
+        metadata["description"] = (
+            f"{item_label} • {len(shipments)} shipments"
+            if len(shipments) > 1
+            else item_label
+        )
+
+    if len(shipments) == 1:
+        metadata["tracking_number"] = shipments[0]["tracking_number"]
+        metadata["carrier"] = shipments[0]["carrier"]
+    return metadata
+
+
+def _walmart_fallback_summary(message: Any, body: str, combined: str) -> dict[str, Any]:
+    """Build metadata for Walmart mail that does not expose shipment parts."""
+    metadata = _item_count_metadata(WALMART_ITEM_COUNT_PATTERN, combined)
+    if expected := _walmart_expected_delivery(message, body):
+        metadata["expected_delivery"] = expected
+    return metadata
+
+
 def _walmart_merchant_metadata(
     message: Any,
     subject: str,
@@ -436,76 +489,17 @@ def _walmart_merchant_metadata(
     if not order_match:
         return None
 
-    lower = combined.lower()
-    if "delivered" in lower or "arrived:" in lower:
-        status = "delivered"
-    elif "out for delivery" in lower:
-        status = "out_for_delivery"
-    elif "let you know when" in lower and "on the way" in lower:
-        status = "awaiting_tracking"
-    elif "shipped" in lower or "on the way" in lower:
-        status = "shipped"
-    else:
-        status = "awaiting_tracking"
-
     metadata: dict[str, Any] = {
         "merchant": "Walmart",
         "order_id": order_match.group(1),
-        "status": status,
+        "status": _walmart_status(combined),
         "source_domain": sender_domain,
     }
-
     shipments = _walmart_shipments(message, body)
     if shipments:
-        metadata["shipments"] = shipments
-        metadata["tracking_numbers"] = [
-            shipment["tracking_number"] for shipment in shipments
-        ]
-
-        expected_dates = [
-            shipment["expected_delivery"]
-            for shipment in shipments
-            if shipment.get("expected_delivery")
-        ]
-        if expected_dates:
-            # Order-level date means "all known parts expected by".
-            metadata["expected_delivery"] = max(expected_dates)
-
-        item_counts = [
-            int(shipment.get("item_count", 0))
-            for shipment in shipments
-            if shipment.get("item_count") is not None
-        ]
-        if item_counts:
-            item_count = sum(item_counts)
-            metadata["item_count"] = item_count
-            item_label = (
-                f"{item_count} item"
-                if item_count == 1
-                else f"{item_count} items"
-            )
-            metadata["description"] = (
-                f"{item_label} • {len(shipments)} shipments"
-                if len(shipments) > 1
-                else item_label
-            )
-
-        if len(shipments) == 1:
-            metadata["tracking_number"] = shipments[0]["tracking_number"]
-            metadata["carrier"] = shipments[0]["carrier"]
-        return metadata
-
-    if expected := _walmart_expected_delivery(message, body):
-        metadata["expected_delivery"] = expected
-    item_counts = [
-        int(match.group(1)) for match in WALMART_ITEM_COUNT_PATTERN.finditer(combined)
-    ]
-    if item_counts:
-        item_count = max(item_counts)
-        metadata["item_count"] = item_count
-        metadata["description"] = (
-            f"{item_count} item" if item_count == 1 else f"{item_count} items"
-        )
+        metadata.update(_walmart_shipment_summary(shipments))
+    else:
+        metadata.update(_walmart_fallback_summary(message, body, combined))
     return metadata
 
 
@@ -871,11 +865,7 @@ def _register_message_candidates(
             result.detected.append(event)
             if candidate.status != "detected":
                 result.transitions.append(event)
-        elif (
-            changed
-            and candidate.status != "detected"
-            and candidate.status != previous_status
-        ):
+        elif changed and candidate.status not in {"detected", previous_status}:
             result.transitions.append(
                 {
                     "tracking_number": candidate.tracking_number,
