@@ -538,9 +538,7 @@ class PackageRegistry:
             else {}
         )
         comparable_new = {
-            key: value
-            for key, value in provider_metadata.items()
-            if key != "synced_at"
+            key: value for key, value in provider_metadata.items() if key != "synced_at"
         }
         if comparable_previous == comparable_new:
             return False
