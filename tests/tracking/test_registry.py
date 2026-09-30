@@ -499,8 +499,6 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
     assert registry.packages["540576743144"]["merchant"]["status"] == "out_for_delivery"
 
 
-
-
 @pytest.mark.asyncio
 async def test_multi_shipment_aggregate_tracks_partial_delivery(registry):
     """Split orders should distinguish partial delivery from full delivery."""
@@ -613,6 +611,7 @@ async def test_package_source_provenance_is_unique(registry):
     assert len(sources) == 2
     assert sources[0]["source_id"] == "<message-1@example>"
     assert sources[1]["source_id"] == "<message-2@example>"
+
 
 @pytest.mark.asyncio
 async def test_provider_not_found_does_not_override_confirmed_carrier_status(registry):
