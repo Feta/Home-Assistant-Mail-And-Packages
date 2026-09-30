@@ -145,16 +145,19 @@ def test_walmart_item_count_prefers_order_summary():
 
 
 def test_opaque_usps_url_token_is_not_accepted_as_ups_tracking():
-    """A 1Z-shaped token inside unrelated carrier URL data is not a UPS package."""
-    candidates = extract_tracking_candidates(
-        _message(
-            "USPS Informed Delivery unsubscribe token "
-            "aQfOOaS9RSmUB3vCuJr1U91xn_Z9egdUJLL5bdlTvne7L9l0fKk32ly"
-            "1ZC0ZTTJuTjb6XPkfg-OyXYpihOHMa0jqAPgUohJ57YyU5Qi",
-            subject="Your Daily Digest is ready to view",
-            sender="USPSInformeddelivery@email.informeddelivery.usps.com",
-        )
+    """A 1Z-shaped value inside an HTML href is not a UPS package."""
+    raw = (
+        b"From: USPS Informed Delivery "
+        b"<USPSInformeddelivery@email.informeddelivery.usps.com>\r\n"
+        b"Subject: Your Daily Digest is ready to view\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n"
+        b"\r\n"
+        b"<p>Manage package delivery notifications.</p>"
+        b"<a href=\"https://example.invalid/unsubscribe/"
+        b"token-1ZC0ZTTJUTJB6XPKFG-more-token\">unsubscribe</a>"
     )
+
+    candidates = extract_tracking_candidates(raw)
 
     assert not any(item.carrier == "ups" for item in candidates)
 
