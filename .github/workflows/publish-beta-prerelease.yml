@@ -1,0 +1,91 @@
+name: Publish beta prerelease
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - custom_components/mail_and_packages/manifest.json
+      - .github/workflows/publish-beta-prerelease.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish beta prerelease
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Read integration version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("custom_components/mail_and_packages/manifest.json").read_text()
+          )
+          print(manifest["version"])
+          PY
+          )"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ ! "$VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+            echo "Version $VERSION is not a prerelease version."
+            exit 1
+          fi
+
+      - name: Build release notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          text = Path("CHANGELOG.md").read_text()
+          pattern = rf"(?ms)^## {re.escape(version)}[^\n]*\n(.*?)(?=^## |\Z)"
+          match = re.search(pattern, text)
+          notes = match.group(1).strip() if match else (
+              f"Super Tracking prerelease {version}."
+          )
+          Path("release-notes.md").write_text(notes + "\n")
+          PY
+
+      - name: Package integration
+        shell: bash
+        run: |
+          cd custom_components/mail_and_packages
+          zip -r ../../mail_and_packages.zip ./
+
+      - name: Publish prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION — Super Tracking Beta" \
+            --notes-file release-notes.md \
+            --prerelease \
+            mail_and_packages.zip
