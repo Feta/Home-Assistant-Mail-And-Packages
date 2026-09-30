@@ -14,7 +14,7 @@ from .entity import MailandPackagesBinarySensorEntityDescription
 DOMAIN = "mail_and_packages"
 DOMAIN_DATA = f"{DOMAIN}_data"
 ASSET_ROOT: Final[Path] = Path(__file__).parent
-VERSION = "0.8.0b5"
+VERSION = "0.8.0b6"
 ISSUE_URL = "https://github.com/Feta/Home-Assistant-Mail-And-Packages/issues"
 PLATFORM = "sensor"
 PLATFORMS = ["binary_sensor", "camera", "sensor"]
