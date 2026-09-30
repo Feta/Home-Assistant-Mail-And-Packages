@@ -521,6 +521,69 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
 
 
 @pytest.mark.asyncio
+async def test_reconcile_linked_package_statuses_repairs_persisted_split_order(registry):
+    """Persisted package lifecycle should self-heal stale shipment metadata."""
+    await registry.async_load()
+    registry.reconcile_merchant_orders(
+        "Walmart",
+        {
+            "2000153-93327828": {
+                "status": "partially_delivered",
+                "shipments": [
+                    {
+                        "part_number": 1,
+                        "part_count": 2,
+                        "tracking_number": "540576743144",
+                        "carrier": "fedex",
+                        "status": "delivered",
+                    },
+                    {
+                        "part_number": 2,
+                        "part_count": 2,
+                        "tracking_number": "877829797830",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                    },
+                ],
+            }
+        },
+    )
+    registry.register_package("540576743144", "fedex", "delivered")
+    registry.enrich_package_merchant(
+        "540576743144",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 1,
+            "part_count": 2,
+            "status": "delivered",
+        },
+    )
+    registry.register_package("877829797830", "fedex", "in_transit")
+    registry.enrich_package_merchant(
+        "877829797830",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 2,
+            "part_count": 2,
+            "status": "shipped",
+        },
+    )
+
+    assert registry.reconcile_linked_package_statuses() == 1
+
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "partially_delivered"
+    assert order["shipments"][0]["status"] == "delivered"
+    assert order["shipments"][1]["status"] == "in_transit"
+    assert registry.packages["877829797830"]["merchant"]["status"] == "in_transit"
+
+    # Once repaired, later refreshes should be idempotent.
+    assert registry.reconcile_linked_package_statuses() == 0
+
+
+@pytest.mark.asyncio
 async def test_multi_shipment_aggregate_tracks_partial_delivery(registry):
     """Split orders should distinguish partial delivery from full delivery."""
     await registry.async_load()
