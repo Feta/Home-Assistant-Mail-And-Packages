@@ -18,11 +18,14 @@ def _message(
     *,
     subject: str = "Shipping update",
     sender: str = "store@example.com",
+    message_id: str = "",
 ) -> bytes:
     """Build a small RFC822 message for scanner tests."""
+    message_id_header = f"Message-ID: {message_id}\r\n" if message_id else ""
     return (
         f"From: {sender}\r\n"
         f"Subject: {subject}\r\n"
+        f"{message_id_header}"
         "Content-Type: text/plain; charset=utf-8\r\n"
         "\r\n"
         f"{body}\r\n"
@@ -356,7 +359,15 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     """A successful scan should register packages and persist UID dedupe state."""
     cache = MagicMock()
     cache.fetch = AsyncMock(
-        return_value=("OK", [_message("Track your UPS package 1Z999AA10123456784")])
+        return_value=(
+            "OK",
+            [
+                _message(
+                    "Track your UPS package 1Z999AA10123456784",
+                    message_id="<scan-123@example.com>",
+                )
+            ],
+        )
     )
 
     with patch(
@@ -377,6 +388,13 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     assert result.state_changed
     assert registry.packages["1Z999AA10123456784"]["source"] == "universal_scan"
     assert registry.packages["1Z999AA10123456784"]["source_from"] == "example.com"
+    assert registry.packages["1Z999AA10123456784"]["sources"] == [
+        {
+            "source": "universal_scan",
+            "source_from": "example.com",
+            "source_id": "<scan-123@example.com>",
+        }
+    ]
     assert registry.is_uid_processed("v7:Packages/123")
 
 
