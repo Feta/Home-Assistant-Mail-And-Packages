@@ -203,6 +203,11 @@ def _message_search_text(raw_message: bytes) -> tuple[str, str, str, Any]:
         text = _decode_text_part(part)
         if not text:
             continue
+        if part.get_content_type() == "text/html":
+            # Search visible email text rather than href/src tokens. Tracking IDs
+            # embedded only in opaque URLs are not evidence of a real package.
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text)
 
         remaining = MAX_EMAIL_TEXT_CHARS - chars
         if remaining <= 0:
@@ -637,6 +642,12 @@ def _has_context(
     local_shipping = any(keyword in nearby for keyword in TRACKING_CONTEXT_KEYWORDS)
     carrier_nearby = any(hint in nearby for hint in pattern.carrier_hints)
     carrier_header = any(hint in header_lower for hint in pattern.carrier_hints)
+
+    # A 1Z number is already carrier-specific. Requiring nearby shipment
+    # language protects against random tokens without losing merchant emails
+    # that say only "Track package 1Z...".
+    if pattern.carrier == "ups":
+        return local_shipping
 
     if carrier_nearby and local_shipping:
         return True
