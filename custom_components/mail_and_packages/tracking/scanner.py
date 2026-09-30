@@ -62,7 +62,7 @@ AMAZON_ARRIVING_DATE_PATTERN = re.compile(
 CARRIER_EMAIL_DOMAINS: dict[str, tuple[str, ...]] = {
     "fedex": ("fedex.com",),
     "ups": ("ups.com",),
-    "usps": ("usps.com",),
+    "usps": ("tracking.usps.com",),
     "dhl": ("dhl.com",),
 }
 
@@ -126,7 +126,7 @@ TRACKING_PATTERNS: tuple[TrackingPattern, ...] = (
         "ups",
         re.compile(r"\b(1Z[0-9A-Z]{16})\b", re.IGNORECASE),
         requires_context=True,
-        carrier_hints=("ups", "united parcel service"),
+        carrier_hints=("ups ", "ups:", "ups.com", "united parcel service"),
     ),
     TrackingPattern(
         "amazon",
@@ -226,7 +226,12 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
             except ValueError:
                 candidate = None
             if candidate is not None:
-                if (datetime.combine(sent, datetime.min.time(), tzinfo=UTC) - candidate).days > 180:
+                sent_midnight = datetime.combine(
+                    sent,
+                    datetime.min.time(),
+                    tzinfo=UTC,
+                )
+                if (sent_midnight - candidate).days > 180:
                     try:
                         candidate = candidate.replace(year=sent.year + 1)
                     except ValueError:
@@ -469,7 +474,11 @@ def _walmart_merchant_metadata(
         if item_counts:
             item_count = sum(item_counts)
             metadata["item_count"] = item_count
-            item_label = f"{item_count} item" if item_count == 1 else f"{item_count} items"
+            item_label = (
+                f"{item_count} item"
+                if item_count == 1
+                else f"{item_count} items"
+            )
             metadata["description"] = (
                 f"{item_label} • {len(shipments)} shipments"
                 if len(shipments) > 1
@@ -703,7 +712,11 @@ def extract_tracking_candidates(raw_message: bytes) -> list[TrackingCandidate]:
                     source_domain=sender_domain,
                     merchant=_shipment_merchant_metadata(merchant, tracking),
                     status=lifecycle or "detected",
-                    source="carrier_email" if lifecycle is not None else "universal_scan",
+                    source=(
+                        "carrier_email"
+                        if lifecycle is not None
+                        else "universal_scan"
+                    ),
                 )
             )
 
