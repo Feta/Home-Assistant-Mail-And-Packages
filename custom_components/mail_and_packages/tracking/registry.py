@@ -520,6 +520,58 @@ class PackageRegistry:
         package["carrier_activation"] = new_value
         return True
 
+    @staticmethod
+    def _apply_provider_metadata(
+        package: dict[str, Any],
+        provider_metadata: dict[str, Any],
+        now: str,
+    ) -> bool:
+        """Update provider metadata only when meaningful fields changed."""
+        previous_provider = package.get("tracking_provider")
+        comparable_previous = (
+            {
+                key: value
+                for key, value in previous_provider.items()
+                if key != "synced_at"
+            }
+            if isinstance(previous_provider, dict)
+            else {}
+        )
+        comparable_new = {
+            key: value
+            for key, value in provider_metadata.items()
+            if key != "synced_at"
+        }
+        if comparable_previous == comparable_new:
+            return False
+        package["tracking_provider"] = provider_metadata
+        package["last_updated"] = now
+        return True
+
+    @staticmethod
+    def _advance_provider_lifecycle(
+        package: dict[str, Any],
+        tracking: str,
+        lifecycle: str | None,
+        provider: str,
+        now: str,
+    ) -> dict[str, Any] | None:
+        """Advance lifecycle state and return the resulting transition."""
+        previous_status = package.get("status", "detected")
+        if not lifecycle or STATUS_RANK.get(lifecycle, 0) <= STATUS_RANK.get(
+            previous_status, 0
+        ):
+            return None
+        package["status"] = lifecycle
+        package["last_updated"] = now
+        return {
+            "tracking_number": tracking,
+            "carrier": package.get("carrier", "unknown"),
+            "status": lifecycle,
+            "previous_status": previous_status,
+            "source": provider,
+        }
+
     def reconcile_tracking_provider_packages(
         self,
         provider: str,
@@ -542,14 +594,13 @@ class PackageRegistry:
             tracking = self.normalize_tracking_number(raw_tracking)
             status_key = self._normalize_provider_status(remote.get("status"))
             lifecycle = PROVIDER_STATUS_LIFECYCLE.get(status_key)
-
             package = self._packages.get(tracking)
+
             if package is None:
-                initial_status = lifecycle or "detected"
                 if not self.register_package(
                     tracking,
                     "unknown",
-                    initial_status,
+                    lifecycle or "detected",
                     source=provider,
                     description=str(remote.get("friendly_name") or ""),
                 ):
@@ -566,42 +617,20 @@ class PackageRegistry:
                 remote,
                 now,
             )
-            previous_provider = package.get("tracking_provider")
-            comparable_previous = (
-                {
-                    key: value
-                    for key, value in previous_provider.items()
-                    if key != "synced_at"
-                }
-                if isinstance(previous_provider, dict)
-                else {}
+            changed_count += int(
+                self._apply_provider_metadata(package, provider_metadata, now)
             )
-            comparable_new = {
-                key: value
-                for key, value in provider_metadata.items()
-                if key != "synced_at"
-            }
-            if comparable_previous != comparable_new:
-                package["tracking_provider"] = provider_metadata
-                package["last_updated"] = now
-                changed_count += 1
 
-            previous_status = package.get("status", "detected")
-            if lifecycle and STATUS_RANK.get(lifecycle, 0) > STATUS_RANK.get(
-                previous_status, 0
-            ):
-                package["status"] = lifecycle
-                package["last_updated"] = now
+            transition = self._advance_provider_lifecycle(
+                package,
+                tracking,
+                lifecycle,
+                provider,
+                now,
+            )
+            if transition is not None:
+                transitions.append(transition)
                 changed_count += 1
-                transitions.append(
-                    {
-                        "tracking_number": tracking,
-                        "carrier": package.get("carrier", "unknown"),
-                        "status": lifecycle,
-                        "previous_status": previous_status,
-                        "source": provider,
-                    }
-                )
 
             provider_exception = self._provider_status_is_exception(
                 status_key,
@@ -613,13 +642,14 @@ class PackageRegistry:
                 package["last_updated"] = now
                 changed_count += 1
 
-            if self._update_carrier_activation(
-                package,
-                status_key,
-                provider_exception,
-                now,
-            ):
-                changed_count += 1
+            changed_count += int(
+                self._update_carrier_activation(
+                    package,
+                    status_key,
+                    provider_exception,
+                    now,
+                )
+            )
 
         return changed_count, transitions
 
@@ -741,10 +771,10 @@ class PackageRegistry:
                 ]
                 if value
             }
-            should_reopen = (
-                self._merchant_status_rank(incoming.get("status"))
-                > self._merchant_status_rank(archived.get("status"))
-                or bool(incoming_tracking - archived_tracking)
+            should_reopen = self._merchant_status_rank(
+                incoming.get("status")
+            ) > self._merchant_status_rank(archived.get("status")) or bool(
+                incoming_tracking - archived_tracking
             )
             if not should_reopen:
                 return False
@@ -934,9 +964,7 @@ class PackageRegistry:
         shipments = [
             item for item in order.get("shipments", []) if isinstance(item, dict)
         ]
-        statuses = [
-            str(item.get("status") or "shipped").lower() for item in shipments
-        ]
+        statuses = [str(item.get("status") or "shipped").lower() for item in shipments]
         if not statuses:
             return "shipped"
         if all(status == "delivered" for status in statuses):
@@ -1319,6 +1347,55 @@ class PackageRegistry:
         self._reconcile_tracking_exceptions(tracking_details)
         return transitions
 
+    @staticmethod
+    def _package_expiry_action(
+        package: dict[str, Any],
+        now: datetime,
+        delivered_days: int,
+        detected_days: int,
+        cleared_days: int,
+    ) -> str | None:
+        """Return archive/remove action for one active package."""
+        try:
+            last_updated = datetime.fromisoformat(package["last_updated"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        age_days = (now - last_updated).days
+        status = package.get("status", "detected")
+        if status == "delivered" and age_days >= delivered_days:
+            return "archive_delivered"
+        if status == "cleared" and age_days >= cleared_days:
+            return "archive_cleared"
+        if (
+            status == "detected"
+            and not package.get("carrier_confirmed")
+            and age_days >= detected_days
+        ):
+            return "remove"
+        return None
+
+    @staticmethod
+    def _merchant_order_archive_reason(
+        order: dict[str, Any],
+        now: datetime,
+        delivered_days: int,
+        detected_days: int,
+    ) -> str | None:
+        """Return an archive reason for one merchant order, if stale."""
+        try:
+            order_updated = datetime.fromisoformat(order["last_updated"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        order_age = (now - order_updated).days
+        order_status = str(order.get("status") or "shipped").lower()
+        if order_status == "delivered" and order_age >= delivered_days:
+            return "delivered_retention"
+        if order_age >= detected_days:
+            return "stale_order"
+        return None
+
     def auto_expire(
         self,
         delivered_days: int = 3,
@@ -1328,60 +1405,47 @@ class PackageRegistry:
         """Archive completed records and remove stale unconfirmed detections."""
         now = datetime.now(UTC)
         now_iso = now.isoformat()
-        to_archive: list[tuple[str, str]] = []
-        to_remove: list[str] = []
-        for tracking, package in self._packages.items():
-            try:
-                last_updated = datetime.fromisoformat(package["last_updated"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            age_days = (now - last_updated).days
-            status = package.get("status", "detected")
-            if status == "delivered" and age_days >= delivered_days:
-                to_archive.append((tracking, "delivered_retention"))
-            elif status == "cleared" and age_days >= cleared_days:
-                to_archive.append((tracking, "cleared_retention"))
-            elif (
-                status == "detected"
-                and not package.get("carrier_confirmed")
-                and age_days >= detected_days
-            ):
-                to_remove.append(tracking)
+        changed = 0
 
-        for tracking, reason in to_archive:
-            package = self._packages.pop(tracking, None)
-            if package is None:
+        for tracking, package in list(self._packages.items()):
+            action = self._package_expiry_action(
+                package,
+                now,
+                delivered_days,
+                detected_days,
+                cleared_days,
+            )
+            if action == "remove":
+                self._packages.pop(tracking, None)
+                changed += 1
+                continue
+            if action not in {"archive_delivered", "archive_cleared"}:
                 continue
             self._archived_packages[tracking] = {
                 **package,
                 "archived_at": now_iso,
-                "archive_reason": reason,
+                "archive_reason": (
+                    "delivered_retention"
+                    if action == "archive_delivered"
+                    else "cleared_retention"
+                ),
             }
-
-        for tracking in to_remove:
             self._packages.pop(tracking, None)
+            changed += 1
 
-        changed = len(to_archive) + len(to_remove)
         for order_key, order in list(self._merchant_orders.items()):
-            try:
-                order_updated = datetime.fromisoformat(order["last_updated"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            order_age = (now - order_updated).days
-            order_status = str(order.get("status") or "shipped").lower()
-            should_archive = (
-                order_status == "delivered" and order_age >= delivered_days
-            ) or order_age >= detected_days
-            if not should_archive:
+            reason = self._merchant_order_archive_reason(
+                order,
+                now,
+                delivered_days,
+                detected_days,
+            )
+            if reason is None:
                 continue
             self._archived_merchant_orders[order_key] = {
                 **order,
                 "archived_at": now_iso,
-                "archive_reason": (
-                    "delivered_retention"
-                    if order_status == "delivered"
-                    else "stale_order"
-                ),
+                "archive_reason": reason,
             }
             self._merchant_orders.pop(order_key, None)
             changed += 1
@@ -1490,11 +1554,7 @@ class PackageRegistry:
             if item.get("last_updated")
         ]
         return {
-            "state": (
-                "attention"
-                if exception_count or overdue_orders
-                else "healthy"
-            ),
+            "state": ("attention" if exception_count or overdue_orders else "healthy"),
             "active_packages": len(packages),
             "merchant_orders": len(orders),
             "pending_orders": len(self.get_pending_orders_list()),
