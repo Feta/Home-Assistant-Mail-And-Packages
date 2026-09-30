@@ -494,21 +494,60 @@ class PackageRegistry:
         return changed_count, transitions
 
     @staticmethod
+    def _merchant_status_rank(status: Any) -> int:
+        """Return a monotonic lifecycle rank for merchant-order statuses."""
+        return {
+            "": 0,
+            "ordered": 0,
+            "pending": 0,
+            "awaiting_tracking": 0,
+            "shipped": 1,
+            "in_transit": 1,
+            "out_for_delivery": 2,
+            "delivered": 3,
+        }.get(str(status or "").lower(), 0)
+
+    @classmethod
     def _preserve_advanced_merchant_status(
+        cls,
         existing: dict[str, Any] | None,
         incoming: dict[str, Any],
     ) -> None:
-        """Prevent stale pre-tracking mail from downgrading an attached order."""
-        if not isinstance(existing, dict) or not existing.get("tracking_number"):
+        """Prevent older merchant mail from downgrading order or shipment state."""
+        if not isinstance(existing, dict):
             return
 
-        existing_status = str(existing.get("status") or "").lower()
-        incoming_status = str(incoming.get("status") or "").lower()
-        pending_statuses = {"", "ordered", "pending", "awaiting_tracking"}
-        advanced_statuses = {"shipped", "out_for_delivery", "delivered"}
-
-        if existing_status in advanced_statuses and incoming_status in pending_statuses:
+        if cls._merchant_status_rank(existing.get("status")) > cls._merchant_status_rank(
+            incoming.get("status")
+        ):
             incoming["status"] = existing.get("status")
+
+        existing_shipments = existing.get("shipments")
+        incoming_shipments = incoming.get("shipments")
+        if not isinstance(existing_shipments, list) or not isinstance(
+            incoming_shipments, list
+        ):
+            return
+
+        existing_by_tracking = {
+            cls.normalize_tracking_number(item.get("tracking_number", "")): item
+            for item in existing_shipments
+            if isinstance(item, dict) and item.get("tracking_number")
+        }
+        for shipment in incoming_shipments:
+            if not isinstance(shipment, dict):
+                continue
+            tracking = cls.normalize_tracking_number(
+                shipment.get("tracking_number", "")
+            )
+            previous = existing_by_tracking.get(tracking)
+            if not isinstance(previous, dict):
+                continue
+            if cls._merchant_status_rank(
+                previous.get("status")
+            ) > cls._merchant_status_rank(shipment.get("status")):
+                shipment["status"] = previous.get("status")
+
 
     def reconcile_merchant_orders(
         self,
@@ -724,16 +763,9 @@ class PackageRegistry:
         shipment = self._shipment_for_tracking(order, tracking)
         if shipment is not None:
             current = str(shipment.get("status") or "shipped")
-            rank = {
-                "awaiting_tracking": 0,
-                "ordered": 0,
-                "pending": 0,
-                "shipped": 1,
-                "in_transit": 1,
-                "out_for_delivery": 2,
-                "delivered": 3,
-            }
-            if rank.get(order_status, 0) > rank.get(current, 0):
+            if self._merchant_status_rank(
+                order_status
+            ) > self._merchant_status_rank(current):
                 shipment["status"] = order_status
                 changed = True
 
@@ -754,16 +786,9 @@ class PackageRegistry:
                 changed = True
         elif order.get("tracking_number") == tracking:
             current = str(order.get("status") or "")
-            rank = {
-                "": 0,
-                "awaiting_tracking": 0,
-                "ordered": 0,
-                "pending": 0,
-                "shipped": 1,
-                "out_for_delivery": 2,
-                "delivered": 3,
-            }
-            if rank.get(order_status, 0) > rank.get(current, 0):
+            if self._merchant_status_rank(
+                order_status
+            ) > self._merchant_status_rank(current):
                 order["status"] = order_status
                 changed = True
 
@@ -1092,6 +1117,14 @@ class PackageRegistry:
                 continue
             tracking_provider = package.get("tracking_provider")
             provider_exception = bool(package.get("provider_exception", False))
+            if (
+                isinstance(tracking_provider, dict)
+                and tracking_provider.get("status_key") == "not_found"
+                and package.get("carrier_confirmed")
+                and status in {"in_transit", "out_for_delivery", "delivered"}
+            ):
+                tracking_provider = None
+                provider_exception = False
             result.append(
                 {
                     "tracking_number": tracking,
