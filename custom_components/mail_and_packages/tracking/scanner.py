@@ -224,7 +224,8 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
     sent = _message_datetime(message).date()
 
     if match := AMAZON_ARRIVING_DATE_PATTERN.search(body):
-        return _date_from_month_day(message, match.group(1), match.group(2))
+        if expected := _date_from_month_day(message, match.group(1), match.group(2)):
+            return expected
 
     if match := AMAZON_ARRIVING_WEEKDAY_PATTERN.search(body):
         weekdays = {
