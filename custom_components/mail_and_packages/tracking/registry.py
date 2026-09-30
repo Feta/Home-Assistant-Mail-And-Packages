@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = "mail_and_packages.package_registry"
@@ -46,6 +47,8 @@ class PackageRegistry:
         )
         self._packages: dict[str, dict[str, Any]] = {}
         self._merchant_orders: dict[str, dict[str, Any]] = {}
+        self._archived_packages: dict[str, dict[str, Any]] = {}
+        self._archived_merchant_orders: dict[str, dict[str, Any]] = {}
         self._processed_uids: dict[str, str] = {}
         self._loaded = False
 
@@ -103,6 +106,16 @@ class PackageRegistry:
         """Return persisted merchant-order records."""
         return self._merchant_orders
 
+    @property
+    def archived_packages(self) -> dict[str, dict[str, Any]]:
+        """Return archived package records retained for history and dedupe."""
+        return self._archived_packages
+
+    @property
+    def archived_merchant_orders(self) -> dict[str, dict[str, Any]]:
+        """Return archived merchant-order records retained for history and dedupe."""
+        return self._archived_merchant_orders
+
     async def async_load(self) -> None:
         """Load registry data from Home Assistant storage once."""
         if self._loaded:
@@ -111,6 +124,11 @@ class PackageRegistry:
         if isinstance(data, dict):
             self._packages = data.get("packages", {})
             self._merchant_orders = data.get("merchant_orders", {})
+            self._archived_packages = data.get("archived_packages", {})
+            self._archived_merchant_orders = data.get(
+                "archived_merchant_orders",
+                {},
+            )
             self._processed_uids = data.get("processed_uids", {})
         self._loaded = True
 
@@ -120,6 +138,8 @@ class PackageRegistry:
             {
                 "packages": self._packages,
                 "merchant_orders": self._merchant_orders,
+                "archived_packages": self._archived_packages,
+                "archived_merchant_orders": self._archived_merchant_orders,
                 "processed_uids": self._processed_uids,
             }
         )
@@ -129,10 +149,51 @@ class PackageRegistry:
         await self._store.async_remove()
 
     @staticmethod
+    def _source_record(
+        source: str,
+        source_from: str = "",
+        source_id: str = "",
+    ) -> dict[str, str]:
+        """Return a compact provenance record for one package observation."""
+        return {
+            key: value
+            for key, value in {
+                "source": str(source or "unknown"),
+                "source_from": str(source_from or ""),
+                "source_id": str(source_id or ""),
+            }.items()
+            if value
+        }
+
+    @classmethod
+    def _record_package_source(
+        cls,
+        package: dict[str, Any],
+        source: str,
+        source_from: str = "",
+        source_id: str = "",
+    ) -> bool:
+        """Retain unique source observations without duplicating the package."""
+        record = cls._source_record(source, source_from, source_id)
+        if not record:
+            return False
+        sources = package.setdefault("sources", [])
+        if not isinstance(sources, list):
+            sources = []
+            package["sources"] = sources
+        if record in sources:
+            return False
+        sources.append(record)
+        return True
+
+    @classmethod
     def _enrich_existing_package(
+        cls,
         existing: dict[str, Any],
         carrier: str,
         source: str,
+        source_from: str,
+        source_id: str,
         now: str,
     ) -> bool:
         """Enrich an existing record without changing its lifecycle state."""
@@ -142,6 +203,8 @@ class PackageRegistry:
             changed = True
         if source == "carrier_email" and not existing.get("carrier_confirmed"):
             existing["carrier_confirmed"] = True
+            changed = True
+        if cls._record_package_source(existing, source, source_from, source_id):
             changed = True
         if changed:
             existing["last_updated"] = now
@@ -155,6 +218,7 @@ class PackageRegistry:
         source: str = "unknown",
         source_from: str = "",
         description: str = "",
+        source_id: str = "",
     ) -> bool:
         """Add a package or advance an existing package to a later state."""
         if status not in STATUS_RANK:
@@ -164,6 +228,9 @@ class PackageRegistry:
             return False
         carrier = str(carrier or "unknown").strip().lower()
         now = datetime.now(UTC).isoformat()
+
+        if tracking in self._archived_packages:
+            return False
 
         if tracking in self._packages:
             existing = self._packages[tracking]
@@ -176,6 +243,8 @@ class PackageRegistry:
                     existing,
                     carrier,
                     source,
+                    source_from,
+                    source_id,
                     now,
                 )
             existing["status"] = status
@@ -184,6 +253,7 @@ class PackageRegistry:
                 existing["carrier"] = carrier
             if source == "carrier_email":
                 existing["carrier_confirmed"] = True
+            self._record_package_source(existing, source, source_from, source_id)
             existing["exception"] = False
             return True
 
@@ -198,6 +268,11 @@ class PackageRegistry:
             "last_updated": now,
             "carrier_confirmed": source == "carrier_email",
             "forwarded_to": {},
+            "sources": [
+                record
+                for record in [self._source_record(source, source_from, source_id)]
+                if record
+            ],
         }
         return True
 
@@ -238,6 +313,8 @@ class PackageRegistry:
         tracking = self.normalize_tracking_number(tracking_number)
         if not tracking:
             return False
+        if tracking in self._archived_packages:
+            self._archived_packages.pop(tracking, None)
         if tracking in self._packages:
             package = self._packages[tracking]
             if package.get("status") != "cleared":
@@ -398,6 +475,48 @@ class PackageRegistry:
             key: value for key, value in metadata.items() if value not in (None, "")
         }
 
+    @staticmethod
+    def _update_carrier_activation(
+        package: dict[str, Any],
+        status_key: str,
+        provider_exception: bool,
+        now: str,
+    ) -> bool:
+        """Track label-activation checks separately from lifecycle timestamps."""
+        existing = package.get("carrier_activation")
+        activation = dict(existing) if isinstance(existing, dict) else {}
+
+        if (
+            status_key == "not_found"
+            and not package.get("carrier_confirmed")
+            and package.get("status", "detected") == "detected"
+        ):
+            new_value = {
+                **activation,
+                "state": "timed_out" if provider_exception else "awaiting",
+                "first_seen": activation.get("first_seen", now),
+                "last_checked": now,
+                "check_count": int(activation.get("check_count", 0)) + 1,
+            }
+        elif activation and activation.get("state") in {"awaiting", "timed_out"}:
+            new_value = {
+                **activation,
+                "state": (
+                    "carrier_confirmed"
+                    if package.get("carrier_confirmed") and status_key == "not_found"
+                    else "activated"
+                ),
+                "last_checked": now,
+                "activated_at": activation.get("activated_at", now),
+            }
+        else:
+            return False
+
+        if new_value == existing:
+            return False
+        package["carrier_activation"] = new_value
+        return True
+
     def reconcile_tracking_provider_packages(
         self,
         provider: str,
@@ -491,6 +610,14 @@ class PackageRegistry:
                 package["last_updated"] = now
                 changed_count += 1
 
+            if self._update_carrier_activation(
+                package,
+                status_key,
+                provider_exception,
+                now,
+            ):
+                changed_count += 1
+
         return changed_count, transitions
 
     @staticmethod
@@ -502,9 +629,11 @@ class PackageRegistry:
             "pending": 0,
             "awaiting_tracking": 0,
             "shipped": 1,
-            "in_transit": 1,
-            "out_for_delivery": 2,
-            "delivered": 3,
+            "in_transit": 2,
+            "partially_out_for_delivery": 3,
+            "out_for_delivery": 3,
+            "partially_delivered": 4,
+            "delivered": 5,
         }.get(str(status or "").lower(), 0)
 
     @classmethod
@@ -590,6 +719,8 @@ class PackageRegistry:
         allowed = self._merchant_order_fields()
         key = self._merchant_order_key(merchant_name, order_id)
         existing = self._merchant_orders.get(key)
+        if existing is None and key in self._archived_merchant_orders:
+            return False
         incoming = self._filter_merchant_fields(metadata, allowed)
         self._preserve_advanced_merchant_status(existing, incoming)
 
@@ -766,19 +897,30 @@ class PackageRegistry:
         return {
             "delivered": "delivered",
             "out_for_delivery": "out_for_delivery",
+            "in_transit": "in_transit",
         }.get(package_status, "shipped")
 
     @classmethod
     def _aggregate_shipment_status(cls, order: dict[str, Any]) -> str:
-        """Return aggregate merchant status from shipment-part states."""
+        """Return a truthful aggregate status for a multi-shipment order."""
         shipments = [
             item for item in order.get("shipments", []) if isinstance(item, dict)
         ]
-        statuses = {str(item.get("status") or "shipped") for item in shipments}
-        if shipments and statuses == {"delivered"}:
+        statuses = [
+            str(item.get("status") or "shipped").lower() for item in shipments
+        ]
+        if not statuses:
+            return "shipped"
+        if all(status == "delivered" for status in statuses):
             return "delivered"
+        if "delivered" in statuses:
+            return "partially_delivered"
         if "out_for_delivery" in statuses:
-            return "out_for_delivery"
+            if all(status == "out_for_delivery" for status in statuses):
+                return "out_for_delivery"
+            return "partially_out_for_delivery"
+        if "in_transit" in statuses:
+            return "in_transit"
         return "shipped"
 
     def _advance_order_for_tracking(
@@ -998,12 +1140,44 @@ class PackageRegistry:
 
         return changed
 
+    @staticmethod
+    def _parse_expected_date(value: Any) -> date | None:
+        """Parse one ISO expected-delivery date."""
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _annotate_overdue(
+        cls,
+        record: dict[str, Any],
+        today: date | None = None,
+    ) -> dict[str, Any]:
+        """Return a copy annotated when an expected delivery date has passed."""
+        annotated = dict(record)
+        expected = cls._parse_expected_date(annotated.get("expected_delivery"))
+        status = str(annotated.get("status") or "").lower()
+        today = today or dt_util.now().date()
+        days_overdue = (
+            (today - expected).days
+            if expected is not None and expected < today and status != "delivered"
+            else 0
+        )
+        annotated["overdue"] = days_overdue > 0
+        annotated["days_overdue"] = max(days_overdue, 0)
+        return annotated
+
     def get_merchant_orders_list(
         self,
         merchant: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return merchant order metadata for dashboard use."""
-        orders = self._merchant_orders.values()
+        orders = [
+            self._annotate_overdue(order) for order in self._merchant_orders.values()
+        ]
         if merchant:
             merchant_lower = merchant.lower()
             orders = [
@@ -1014,6 +1188,28 @@ class PackageRegistry:
         return sorted(
             orders,
             key=lambda item: item.get("last_updated", ""),
+            reverse=True,
+        )
+
+    def get_archived_packages_list(self) -> list[dict[str, Any]]:
+        """Return package history retained after active dashboard expiry."""
+        return sorted(
+            (
+                {"tracking_number": tracking, **package}
+                for tracking, package in self._archived_packages.items()
+            ),
+            key=lambda item: item.get("archived_at", ""),
+            reverse=True,
+        )
+
+    def get_archived_merchant_orders_list(self) -> list[dict[str, Any]]:
+        """Return archived merchant-order history."""
+        return sorted(
+            (
+                self._annotate_overdue(order)
+                for order in self._archived_merchant_orders.values()
+            ),
+            key=lambda item: item.get("archived_at", ""),
             reverse=True,
         )
 
@@ -1101,8 +1297,10 @@ class PackageRegistry:
         detected_days: int = 14,
         cleared_days: int = 30,
     ) -> int:
-        """Remove stale delivered, cleared, and unconfirmed detected records."""
+        """Archive completed records and remove stale unconfirmed detections."""
         now = datetime.now(UTC)
+        now_iso = now.isoformat()
+        to_archive: list[tuple[str, str]] = []
         to_remove: list[str] = []
         for tracking, package in self._packages.items():
             try:
@@ -1111,34 +1309,56 @@ class PackageRegistry:
                 continue
             age_days = (now - last_updated).days
             status = package.get("status", "detected")
-            if (
-                (status == "delivered" and age_days >= delivered_days)
-                or (status == "cleared" and age_days >= cleared_days)
-                or (
-                    status == "detected"
-                    and not package.get("carrier_confirmed")
-                    and age_days >= detected_days
-                )
+            if status == "delivered" and age_days >= delivered_days:
+                to_archive.append((tracking, "delivered_retention"))
+            elif status == "cleared" and age_days >= cleared_days:
+                to_archive.append((tracking, "cleared_retention"))
+            elif (
+                status == "detected"
+                and not package.get("carrier_confirmed")
+                and age_days >= detected_days
             ):
                 to_remove.append(tracking)
+
+        for tracking, reason in to_archive:
+            package = self._packages.pop(tracking, None)
+            if package is None:
+                continue
+            self._archived_packages[tracking] = {
+                **package,
+                "archived_at": now_iso,
+                "archive_reason": reason,
+            }
+
         for tracking in to_remove:
             self._packages.pop(tracking, None)
 
-        removed = len(to_remove)
-        for order_id, order in list(self._merchant_orders.items()):
+        changed = len(to_archive) + len(to_remove)
+        for order_key, order in list(self._merchant_orders.items()):
             try:
                 order_updated = datetime.fromisoformat(order["last_updated"])
             except (KeyError, TypeError, ValueError):
                 continue
             order_age = (now - order_updated).days
-            order_status = order.get("status", "shipped")
-            if (
+            order_status = str(order.get("status") or "shipped").lower()
+            should_archive = (
                 order_status == "delivered" and order_age >= delivered_days
-            ) or order_age >= detected_days:
-                self._merchant_orders.pop(order_id, None)
-                removed += 1
+            ) or order_age >= detected_days
+            if not should_archive:
+                continue
+            self._archived_merchant_orders[order_key] = {
+                **order,
+                "archived_at": now_iso,
+                "archive_reason": (
+                    "delivered_retention"
+                    if order_status == "delivered"
+                    else "stale_order"
+                ),
+            }
+            self._merchant_orders.pop(order_key, None)
+            changed += 1
 
-        return removed
+        return changed
 
     def get_counts(self) -> dict[str, int]:
         """Return tracked, in-transit, and delivered package counts."""
@@ -1181,6 +1401,13 @@ class PackageRegistry:
             ):
                 tracking_provider = None
                 provider_exception = False
+            merchant = package.get("merchant")
+            annotated_merchant = (
+                self._annotate_overdue(merchant)
+                if isinstance(merchant, dict)
+                else merchant
+            )
+            activation = package.get("carrier_activation")
             result.append(
                 {
                     "tracking_number": tracking,
@@ -1190,12 +1417,12 @@ class PackageRegistry:
                         package.get("exception", False) or provider_exception
                     ),
                     "awaiting_carrier_activation": bool(
-                        status == "detected"
-                        and isinstance(tracking_provider, dict)
-                        and tracking_provider.get("status_key") == "not_found"
-                        and not provider_exception
+                        isinstance(activation, dict)
+                        and activation.get("state") == "awaiting"
                     ),
                     "source": package.get("source", "unknown"),
+                    "source_from": package.get("source_from", ""),
+                    "sources": package.get("sources", []),
                     "first_seen": package.get("first_seen", ""),
                     "last_updated": package.get("last_updated", ""),
                     "carrier_confirmed": package.get("carrier_confirmed", False),
@@ -1205,22 +1432,70 @@ class PackageRegistry:
                         else []
                     ),
                     "tracking_provider": tracking_provider,
-                    "merchant": package.get("merchant"),
+                    "carrier_activation": activation,
+                    "merchant": annotated_merchant,
+                    "overdue": bool(
+                        isinstance(annotated_merchant, dict)
+                        and annotated_merchant.get("overdue")
+                    ),
+                    "days_overdue": (
+                        annotated_merchant.get("days_overdue", 0)
+                        if isinstance(annotated_merchant, dict)
+                        else 0
+                    ),
                 }
             )
         return result
 
+    def get_health_summary(self) -> dict[str, Any]:
+        """Return a compact diagnostic summary for the registry."""
+        packages = self.get_packages_list()
+        orders = self.get_merchant_orders_list()
+        exception_count = sum(1 for package in packages if package.get("exception"))
+        awaiting_activation = sum(
+            1 for package in packages if package.get("awaiting_carrier_activation")
+        )
+        overdue_orders = sum(1 for order in orders if order.get("overdue"))
+        last_updates = [
+            str(item.get("last_updated") or "")
+            for item in [*packages, *orders]
+            if item.get("last_updated")
+        ]
+        return {
+            "state": (
+                "attention"
+                if exception_count or overdue_orders
+                else "healthy"
+            ),
+            "active_packages": len(packages),
+            "merchant_orders": len(orders),
+            "pending_orders": len(self.get_pending_orders_list()),
+            "archived_packages": len(self._archived_packages),
+            "archived_merchant_orders": len(self._archived_merchant_orders),
+            "awaiting_carrier_activation": awaiting_activation,
+            "exceptions": exception_count,
+            "overdue_orders": overdue_orders,
+            "processed_uid_count": len(self._processed_uids),
+            "last_registry_change": max(last_updates, default=""),
+        }
+
     def coordinator_data(self) -> dict[str, Any]:
         """Return registry data shaped for coordinator-backed sensors."""
         counts = self.get_counts()
+        health = self.get_health_summary()
         return {
             "registry_tracked": counts["tracked"],
             "registry_in_transit": counts["in_transit"],
             "registry_delivered": counts["delivered"],
+            "registry_archived": len(self._archived_packages),
+            "registry_health": health["state"],
             "registry_packages_list": self.get_packages_list(),
             "registry_in_transit_list": self.get_packages_list("in_transit"),
             "registry_delivered_list": self.get_packages_list("delivered"),
+            "registry_archived_list": self.get_archived_packages_list(),
+            "registry_archived_orders_list": self.get_archived_merchant_orders_list(),
             "registry_merchant_orders_list": self.get_merchant_orders_list(),
             "registry_pending_orders_list": self.get_pending_orders_list(),
             "registry_amazon_orders_list": self.get_amazon_orders_list(),
+            "registry_health_data": health,
         }
