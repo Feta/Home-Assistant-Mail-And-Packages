@@ -521,7 +521,9 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_linked_package_statuses_repairs_persisted_split_order(registry):
+async def test_reconcile_linked_package_statuses_repairs_persisted_split_order(
+    registry,
+):
     """Persisted package lifecycle should self-heal stale shipment metadata."""
     await registry.async_load()
     registry.reconcile_merchant_orders(
