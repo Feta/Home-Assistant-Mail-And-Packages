@@ -498,6 +498,27 @@ async def test_carrier_lifecycle_updates_split_shipment_and_order(registry):
     assert order["shipments"][1]["status"] == "shipped"
     assert registry.packages["540576743144"]["merchant"]["status"] == "out_for_delivery"
 
+    registry.register_package("877829797830", "fedex", "detected")
+    registry.enrich_package_merchant(
+        "877829797830",
+        {
+            "merchant": "Walmart",
+            "order_id": "2000153-93327828",
+            "part_number": 2,
+            "part_count": 2,
+            "status": "shipped",
+        },
+    )
+    assert registry.register_package(
+        "877829797830",
+        "fedex",
+        "out_for_delivery",
+        source="carrier_email",
+    )
+    assert registry.sync_tracking_status_to_merchant_order("877829797830")
+    order = registry.get_merchant_orders_list("Walmart")[0]
+    assert order["status"] == "out_for_delivery"
+
 
 @pytest.mark.asyncio
 async def test_multi_shipment_aggregate_tracks_partial_delivery(registry):
