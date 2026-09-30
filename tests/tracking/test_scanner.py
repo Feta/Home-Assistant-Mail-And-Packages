@@ -144,6 +144,43 @@ def test_walmart_item_count_prefers_order_summary():
     assert orders[0]["description"] == "2 items"
 
 
+def test_usps_plaintext_url_token_is_not_accepted_as_ups_tracking():
+    """Generic USPS package wording must not validate a 1Z token without UPS context."""
+    raw = (
+        b"From: USPS Informed Delivery "
+        b"<USPSInformeddelivery@email.informeddelivery.usps.com>\r\n"
+        b"Subject: Your Daily Digest for Wed, 9/30 is ready to view\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"You have 0 inbound package(s) arriving soon.\r\n"
+        b"PACKAGES\r\n"
+        b"No packages are available to display.\r\n"
+        b"Always know the status of your USPS deliveries.\r\n"
+        b"https://informeddelivery.usps.com/trackingV2/digest/click?"
+        b"a=abc-1ZC0ZTTJUTJB6XPKFG-more-token\r\n"
+    )
+
+    candidates = extract_tracking_candidates(raw)
+
+    assert not any(item.carrier == "ups" for item in candidates)
+
+
+def test_visible_ups_tracking_with_carrier_context_is_accepted():
+    """A real visible UPS tracking number should still be detected."""
+    candidates = extract_tracking_candidates(
+        _message(
+            "Track your UPS package 1Z999AA10123456784 for delivery updates.",
+            subject="Your UPS shipment is on the way",
+            sender="shipping@example.com",
+        )
+    )
+
+    assert any(
+        item.carrier == "ups" and item.tracking_number == "1Z999AA10123456784"
+        for item in candidates
+    )
+
+
 def test_opaque_usps_url_token_is_not_accepted_as_ups_tracking():
     """A 1Z-shaped value inside an HTML href is not a UPS package."""
     raw = (
@@ -340,7 +377,7 @@ async def test_scan_registers_package_and_marks_uid(registry, account):
     assert result.state_changed
     assert registry.packages["1Z999AA10123456784"]["source"] == "universal_scan"
     assert registry.packages["1Z999AA10123456784"]["source_from"] == "example.com"
-    assert registry.is_uid_processed("v6:Packages/123")
+    assert registry.is_uid_processed("v7:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -419,13 +456,13 @@ async def test_scan_persists_walmart_order_without_tracking(registry, account):
     assert len(orders) == 1
     assert orders[0]["order_id"] == "2000153-93327828"
     assert orders[0]["status"] == "awaiting_tracking"
-    assert registry.is_uid_processed("v6:Packages/789")
+    assert registry.is_uid_processed("v7:Packages/789")
 
 
 @pytest.mark.asyncio
 async def test_scan_skips_previously_processed_uid(registry, account):
     """Previously processed messages should not be fetched again."""
-    registry.mark_uid_processed("v6:Packages/123")
+    registry.mark_uid_processed("v7:Packages/123")
     cache = MagicMock()
     cache.fetch = AsyncMock()
 
@@ -466,7 +503,7 @@ async def test_scan_retries_fetch_failure(registry, account):
         )
 
     assert result.fetch_failures == 1
-    assert not registry.is_uid_processed("v6:Packages/123")
+    assert not registry.is_uid_processed("v7:Packages/123")
 
 
 @pytest.mark.asyncio
@@ -489,10 +526,10 @@ async def test_scan_processes_newest_messages_in_bounded_batches(registry, accou
         )
 
     assert result.scanned_messages == 2
-    assert not registry.is_uid_processed("v6:Packages/1")
-    assert not registry.is_uid_processed("v6:Packages/2")
-    assert registry.is_uid_processed("v6:Packages/3")
-    assert registry.is_uid_processed("v6:Packages/4")
+    assert not registry.is_uid_processed("v7:Packages/1")
+    assert not registry.is_uid_processed("v7:Packages/2")
+    assert registry.is_uid_processed("v7:Packages/3")
+    assert registry.is_uid_processed("v7:Packages/4")
 
 
 @pytest.mark.asyncio
@@ -524,8 +561,8 @@ async def test_scan_timeout_preserves_partial_progress(registry, account):
 
     assert result.timed_out
     assert result.scanned_messages == 1
-    assert registry.is_uid_processed("v6:Packages/1")
-    assert not registry.is_uid_processed("v6:Packages/2")
+    assert registry.is_uid_processed("v7:Packages/1")
+    assert not registry.is_uid_processed("v7:Packages/2")
     assert "1Z999AA10123456784" in registry.packages
     assert "TBA123456789012" not in registry.packages
 
@@ -555,4 +592,4 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
 
     assert not result.detected
     assert registry.packages["1Z999AA10123456784"]["status"] == "cleared"
-    assert registry.is_uid_processed("v6:Packages/123")
+    assert registry.is_uid_processed("v7:Packages/123")
