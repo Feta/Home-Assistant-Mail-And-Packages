@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mail_and_packages.const import (
+    CONF_AMAZON_DAYS,
+    CONF_CUSTOM_DAYS,
     CONF_FOLDER,
     CONF_FORWARD_TO_SEVENTEENTRACK,
     DOMAIN,
@@ -134,7 +136,9 @@ async def test_registry_refresh_reconciles_linked_package_statuses(hass):
 
     registry = MagicMock()
     registry.async_load = AsyncMock()
+    registry.prune_non_carrier_packages.return_value = 0
     registry.reconcile_tracking_details.return_value = []
+    registry.reconcile_marketplace_carrier_tracking.return_value = 0
     registry.reconcile_amazon_orders.return_value = 0
     registry.reconcile_linked_package_statuses.return_value = 1
     registry.auto_expire.return_value = 0
@@ -145,9 +149,44 @@ async def test_registry_refresh_reconciles_linked_package_statuses(hass):
     data = {}
     await coordinator._update_package_registry(data, {}, {})
 
+    registry.prune_non_carrier_packages.assert_called_once_with()
+    registry.reconcile_marketplace_carrier_tracking.assert_called_once_with({}, {})
     registry.reconcile_linked_package_statuses.assert_called_once_with()
     registry.async_save.assert_awaited_once_with()
     assert data["registry_tracked"] == 2
+
+
+@pytest.mark.asyncio
+async def test_rescan_registry_uses_temporary_lookback(hass):
+    """Explicit rescans should widen history without mutating saved options."""
+    config = {
+        **FAKE_CONFIG_DATA,
+        CONF_CUSTOM_DAYS: 3,
+        CONF_AMAZON_DAYS: 3,
+    }
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, config)
+
+    registry = MagicMock()
+    registry.async_load = AsyncMock()
+    registry.reset_processed_uids.return_value = 42
+    coordinator.registry = registry
+    coordinator.process_emails = AsyncMock(return_value={"registry_tracked": 1})
+    coordinator._async_forward_registry_packages = AsyncMock()
+    coordinator._binary_sensor_update = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+
+    await coordinator.async_rescan_registry(14)
+
+    called_config = coordinator.process_emails.await_args.args[1]
+    assert called_config[CONF_CUSTOM_DAYS] == 14
+    assert called_config[CONF_AMAZON_DAYS] == 14
+    assert coordinator.config[CONF_CUSTOM_DAYS] == 3
+    assert coordinator.config[CONF_AMAZON_DAYS] == 3
+    registry.reset_processed_uids.assert_called_once_with()
+    coordinator.async_set_updated_data.assert_called_once_with(
+        {"registry_tracked": 1}
+    )
 
 
 @pytest.mark.asyncio
