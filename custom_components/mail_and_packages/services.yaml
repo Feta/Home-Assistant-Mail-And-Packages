@@ -100,4 +100,3 @@ rescan_registry:
           min: 1
           max: 30
           mode: box
-
