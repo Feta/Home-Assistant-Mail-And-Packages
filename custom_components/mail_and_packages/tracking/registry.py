@@ -33,7 +33,7 @@ PROVIDER_EXCEPTION_STATUSES = {
     "undelivered",
 }
 PROVIDER_NOT_FOUND_GRACE_HOURS = 48
-NON_CARRIER_REGISTRY_PREFIXES = {"etsy", "home_depot", "shopify", "walmart"}
+NON_CARRIER_REGISTRY_PREFIXES = {"shopify", "walmart"}
 
 
 class PackageRegistry:
