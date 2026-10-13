@@ -246,6 +246,30 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             await self._binary_sensor_update(data)
         return self._data
 
+    async def async_rescan_registry(self, days: int = 14) -> dict:
+        """Run one explicit bounded historical scan without changing saved options."""
+        bounded_days = max(1, min(int(days), 30))
+        config = dict(self.config)
+        config[CONF_CUSTOM_DAYS] = bounded_days
+        config[const.CONF_AMAZON_DAYS] = bounded_days
+
+        auth_type = config.get(CONF_AUTH_TYPE, AUTH_TYPE_PASSWORD)
+        if auth_type != AUTH_TYPE_PASSWORD and self.config_entry:
+            oauth_token = await self._async_oauth_access_token(auth_type)
+            config["oauth_token"] = oauth_token
+
+        if self.registry is not None:
+            await self.registry.async_load()
+            self.registry.reset_processed_uids()
+
+        data = await self.process_emails(self.hass, config)
+        if data:
+            await self._async_forward_registry_packages(data)
+            self._data = data
+            await self._binary_sensor_update(data)
+            self.async_set_updated_data(data)
+        return self._data
+
     async def process_emails(self, hass: HomeAssistant, config: dict) -> dict:
         """Process emails and update sensors."""
         # Initialize defaults and image paths
@@ -274,6 +298,11 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             tracking_details = shipper_data.pop("_tracking_details", {})
             amazon_orders = shipper_data.pop(const.AMAZON_REGISTRY_ORDERS, {})
             data.update(shipper_data)
+            marketplace_carrier_tracking = {
+                prefix: dict(data.get(f"{prefix}_carrier_tracking") or {})
+                for prefix in const.MARKETPLACE_CARRIER_TRACKING
+                if data.get(f"{prefix}_carrier_tracking")
+            }
             self._dedupe_marketplace_duplicates(data, tracking_details)
             self._apply_tracking_state(data, tracking_details, today_iso)
             self._latch_mail_delivered(data, today_iso)
@@ -281,6 +310,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 data,
                 tracking_details,
                 amazon_orders,
+                marketplace_carrier_tracking,
             )
             await self._async_scan_universal_tracking(
                 account,
@@ -310,13 +340,19 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         data: dict,
         tracking_details: dict[str, list[str]],
         amazon_orders: dict[str, dict] | None = None,
+        marketplace_carrier_tracking: dict[str, dict[str, str]] | None = None,
     ) -> None:
         """Reconcile carrier tracking and merchant metadata into the registry."""
         if self.registry is None:
             return
 
         await self.registry.async_load()
+        pruned = self.registry.prune_non_carrier_packages()
         transitions = self.registry.reconcile_tracking_details(tracking_details)
+        marketplace_changes = self.registry.reconcile_marketplace_carrier_tracking(
+            marketplace_carrier_tracking or {},
+            tracking_details,
+        )
         amazon_changes = self.registry.reconcile_amazon_orders(amazon_orders or {})
         linked_status_changes = self.registry.reconcile_linked_package_statuses()
         expired = self.registry.auto_expire(
@@ -331,7 +367,14 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         )
         data.update(self.registry.coordinator_data())
 
-        if transitions or amazon_changes or linked_status_changes or expired:
+        if (
+            transitions
+            or marketplace_changes
+            or amazon_changes
+            or linked_status_changes
+            or pruned
+            or expired
+        ):
             await self.registry.async_save()
 
         for transition in transitions:
