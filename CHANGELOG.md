@@ -2,6 +2,17 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b9 - 2026-10-13
+
+### Marketplace tracking and pickup lifecycle
+
+- Stop Shopify order identifiers such as `SH140057-MU` from being persisted as physical carrier packages and prune legacy synthetic Shopify package records on upgrade.
+- Preserve physical carrier numbers embedded in marketplace mail and register distinctive UPS, USPS, FedEx, DHL, or Amazon tracking IDs instead of the marketplace order ID.
+- Treat recognized tracking-provider lifecycle responses as carrier confirmation.
+- Canonicalize pickup-ready provider states and promote them to a first-class `ready_for_pickup` lifecycle without regressing delivered-state monotonicity.
+- Add a bounded `mail_and_packages.rescan_registry` service for one-off historical repairs without permanently widening normal package-email lookback settings.
+- Add regression coverage for the live b8 Shopify, provider-confirmation, pickup-ready, and rescan cases.
+
 ## 0.8.0b8 - 2026-09-30
 
 ### Linked package/order self-healing
