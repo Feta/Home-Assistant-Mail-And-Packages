@@ -184,9 +184,7 @@ async def test_rescan_registry_uses_temporary_lookback(hass):
     assert coordinator.config[CONF_CUSTOM_DAYS] == 3
     assert coordinator.config[CONF_AMAZON_DAYS] == 3
     registry.reset_processed_uids.assert_called_once_with()
-    coordinator.async_set_updated_data.assert_called_once_with(
-        {"registry_tracked": 1}
-    )
+    coordinator.async_set_updated_data.assert_called_once_with({"registry_tracked": 1})
 
 
 @pytest.mark.asyncio
