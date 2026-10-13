@@ -613,7 +613,6 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
     assert registry.is_uid_processed("v7:Packages/123")
 
 
-
 def test_shopify_style_mail_yields_actual_usps_tracking_not_store_order_id():
     """Storefront order references must not mask a genuine USPS tracking number."""
     raw = _message(
