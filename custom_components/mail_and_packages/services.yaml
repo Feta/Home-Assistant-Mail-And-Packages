@@ -85,3 +85,18 @@ attach_tracking:
       default: unknown
       selector:
         text:
+
+rescan_registry:
+  name: Rescan Package Registry
+  description: Reprocess recent package email history without changing the normal saved lookback window.
+  fields:
+    days:
+      name: Days Back
+      description: Number of recent days to rescan. The scan is bounded to 1-30 days.
+      required: false
+      default: 14
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box

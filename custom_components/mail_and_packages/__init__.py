@@ -266,11 +266,21 @@ async def _handle_attach_tracking(
         hass.async_create_task(coordinator.async_request_refresh())
 
 
+async def _handle_rescan_registry(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> None:
+    """Run one bounded historical package-registry rescan."""
+    days = int(call.data.get("days", 14))
+    coordinators = list(_registry_coordinators(hass))
+    if coordinators:
+        await asyncio.gather(
+            *(coordinator.async_rescan_registry(days) for coordinator in coordinators)
+        )
+
+
 def _register_registry_services(hass: HomeAssistant) -> None:
     """Register package-registry management services once."""
-    if hass.services.has_service(DOMAIN, "clear_package"):
-        return
-
     tracking_schema = vol.Schema({vol.Required("tracking_number"): cv.string})
     add_schema = vol.Schema(
         {
@@ -286,36 +296,56 @@ def _register_registry_services(hass: HomeAssistant) -> None:
             vol.Optional("carrier", default="unknown"): cv.string,
         }
     )
+    rescan_schema = vol.Schema(
+        {
+            vol.Optional("days", default=14): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=1, max=30),
+            )
+        }
+    )
 
-    hass.services.async_register(
-        DOMAIN,
-        "clear_package",
-        partial(_handle_clear_package, hass),
-        schema=tracking_schema,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        "clear_all_delivered",
-        partial(_handle_clear_all_delivered, hass),
-    )
-    hass.services.async_register(
-        DOMAIN,
-        "mark_delivered",
-        partial(_handle_mark_delivered, hass),
-        schema=tracking_schema,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        "add_package",
-        partial(_handle_add_package, hass),
-        schema=add_schema,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        "attach_tracking",
-        partial(_handle_attach_tracking, hass),
-        schema=attach_schema,
-    )
+    if not hass.services.has_service(DOMAIN, "clear_package"):
+        hass.services.async_register(
+            DOMAIN,
+            "clear_package",
+            partial(_handle_clear_package, hass),
+            schema=tracking_schema,
+        )
+    if not hass.services.has_service(DOMAIN, "clear_all_delivered"):
+        hass.services.async_register(
+            DOMAIN,
+            "clear_all_delivered",
+            partial(_handle_clear_all_delivered, hass),
+        )
+    if not hass.services.has_service(DOMAIN, "mark_delivered"):
+        hass.services.async_register(
+            DOMAIN,
+            "mark_delivered",
+            partial(_handle_mark_delivered, hass),
+            schema=tracking_schema,
+        )
+    if not hass.services.has_service(DOMAIN, "add_package"):
+        hass.services.async_register(
+            DOMAIN,
+            "add_package",
+            partial(_handle_add_package, hass),
+            schema=add_schema,
+        )
+    if not hass.services.has_service(DOMAIN, "attach_tracking"):
+        hass.services.async_register(
+            DOMAIN,
+            "attach_tracking",
+            partial(_handle_attach_tracking, hass),
+            schema=attach_schema,
+        )
+    if not hass.services.has_service(DOMAIN, "rescan_registry"):
+        hass.services.async_register(
+            DOMAIN,
+            "rescan_registry",
+            partial(_handle_rescan_registry, hass),
+            schema=rescan_schema,
+        )
 
 
 async def async_setup_entry(

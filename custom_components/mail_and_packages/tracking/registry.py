@@ -16,14 +16,15 @@ STATUS_RANK = {
     "detected": 0,
     "in_transit": 1,
     "out_for_delivery": 2,
-    "delivered": 3,
-    "cleared": 4,
+    "ready_for_pickup": 3,
+    "delivered": 4,
+    "cleared": 5,
 }
 
 PROVIDER_STATUS_LIFECYCLE = {
     "in_transit": "in_transit",
     "out_for_delivery": "out_for_delivery",
-    "ready_to_be_picked_up": "in_transit",
+    "ready_for_pickup": "ready_for_pickup",
     "delivered": "delivered",
 }
 PROVIDER_EXCEPTION_STATUSES = {
@@ -32,7 +33,7 @@ PROVIDER_EXCEPTION_STATUSES = {
     "undelivered",
 }
 PROVIDER_NOT_FOUND_GRACE_HOURS = 48
-NON_CARRIER_REGISTRY_PREFIXES = {"walmart"}
+NON_CARRIER_REGISTRY_PREFIXES = {"shopify", "walmart"}
 
 
 class PackageRegistry:
@@ -90,6 +91,7 @@ class PackageRegistry:
             if package.get("carrier_confirmed") and package.get("status") in {
                 "in_transit",
                 "out_for_delivery",
+                "ready_for_pickup",
                 "delivered",
             }:
                 return False
@@ -372,6 +374,12 @@ class PackageRegistry:
                 removed += 1
         return removed
 
+    def reset_processed_uids(self) -> int:
+        """Clear scanner UID markers so a bounded historical rescan can reprocess mail."""
+        count = len(self._processed_uids)
+        self._processed_uids.clear()
+        return count
+
     def is_forwarded(
         self,
         tracking_number: str,
@@ -444,7 +452,15 @@ class PackageRegistry:
     @staticmethod
     def _normalize_provider_status(status: Any) -> str:
         """Normalize a provider status to a stable snake-case key."""
-        return "_".join(str(status or "").strip().lower().replace("-", " ").split())
+        normalized = "_".join(
+            str(status or "").strip().lower().replace("-", " ").split()
+        )
+        return {
+            "pickup": "ready_for_pickup",
+            "pick_up": "ready_for_pickup",
+            "available_for_pickup": "ready_for_pickup",
+            "ready_to_be_picked_up": "ready_for_pickup",
+        }.get(normalized, normalized)
 
     @staticmethod
     def _provider_metadata(
@@ -628,6 +644,11 @@ class PackageRegistry:
             )
             if transition is not None:
                 transitions.append(transition)
+                changed_count += 1
+
+            if lifecycle is not None and not package.get("carrier_confirmed"):
+                package["carrier_confirmed"] = True
+                package["last_updated"] = now
                 changed_count += 1
 
             provider_exception = self._provider_status_is_exception(
@@ -952,6 +973,7 @@ class PackageRegistry:
         """Map package lifecycle to merchant-order lifecycle."""
         return {
             "delivered": "delivered",
+            "ready_for_pickup": "out_for_delivery",
             "out_for_delivery": "out_for_delivery",
             "in_transit": "in_transit",
         }.get(package_status, "shipped")
@@ -1315,6 +1337,80 @@ class PackageRegistry:
             for number in numbers:
                 self.set_exception(number, True)
 
+    @classmethod
+    def _infer_carrier_from_tracking(cls, tracking_number: str) -> str:
+        """Infer a physical carrier from distinctive tracking-number formats."""
+        tracking = cls.normalize_tracking_number(tracking_number)
+        if tracking.startswith("1Z") and len(tracking) == 18:
+            return "ups"
+        if (
+            tracking.isdigit()
+            and tracking.startswith(("92", "93", "94", "95"))
+            and 17 <= len(tracking) <= 27
+        ):
+            return "usps"
+        if tracking.startswith("TBA") and tracking[3:].isdigit():
+            return "amazon"
+        if tracking.startswith(("JD", "JJD")):
+            return "dhl"
+        if tracking.isdigit() and len(tracking) in {12, 15, 20, 22}:
+            return "fedex"
+        return "unknown"
+
+    def prune_non_carrier_packages(self) -> int:
+        """Remove legacy marketplace/order identifiers from package state."""
+        removed = 0
+        for package_store in (self._packages, self._archived_packages):
+            for tracking, package in list(package_store.items()):
+                carrier = str(package.get("carrier") or "").lower()
+                if carrier not in NON_CARRIER_REGISTRY_PREFIXES:
+                    continue
+                if package.get("source") == "manual":
+                    continue
+                package_store.pop(tracking, None)
+                removed += 1
+        return removed
+
+    def reconcile_marketplace_carrier_tracking(
+        self,
+        mappings: dict[str, dict[str, str]],
+        tracking_details: dict[str, list[str]],
+    ) -> int:
+        """Register physical carrier numbers embedded in marketplace mail."""
+        changed = 0
+        for prefix, mapping in mappings.items():
+            if not isinstance(mapping, dict):
+                continue
+            delivering = {
+                self.normalize_tracking_number(value)
+                for value in tracking_details.get(f"{prefix}_delivering", [])
+                if value
+            }
+            delivered = {
+                self.normalize_tracking_number(value)
+                for value in tracking_details.get(f"{prefix}_delivered", [])
+                if value
+            }
+            for marketplace_id, carrier_number in mapping.items():
+                marketplace_tracking = self.normalize_tracking_number(marketplace_id)
+                if marketplace_tracking not in delivering | delivered:
+                    continue
+                carrier = self._infer_carrier_from_tracking(carrier_number)
+                if carrier == "unknown":
+                    continue
+                status = (
+                    "delivered" if marketplace_tracking in delivered else "in_transit"
+                )
+                if self.register_package(
+                    carrier_number,
+                    carrier,
+                    status=status,
+                    source="marketplace_email",
+                    source_from=prefix,
+                ):
+                    changed += 1
+        return changed
+
     def reconcile_tracking_details(
         self, tracking_details: dict[str, list[str]]
     ) -> list[dict[str, Any]]:
@@ -1466,7 +1562,12 @@ class PackageRegistry:
             if status == "cleared":
                 continue
             counts["tracked"] += 1
-            if status in ("detected", "in_transit", "out_for_delivery"):
+            if status in (
+                "detected",
+                "in_transit",
+                "out_for_delivery",
+                "ready_for_pickup",
+            ):
                 counts["in_transit"] += 1
             elif status == "delivered":
                 counts["delivered"] += 1
@@ -1485,6 +1586,7 @@ class PackageRegistry:
                 "detected",
                 "in_transit",
                 "out_for_delivery",
+                "ready_for_pickup",
             ):
                 continue
             if status_filter not in (None, "in_transit") and status != status_filter:
@@ -1495,7 +1597,13 @@ class PackageRegistry:
                 isinstance(tracking_provider, dict)
                 and tracking_provider.get("status_key") == "not_found"
                 and package.get("carrier_confirmed")
-                and status in {"in_transit", "out_for_delivery", "delivered"}
+                and status
+                in {
+                    "in_transit",
+                    "out_for_delivery",
+                    "ready_for_pickup",
+                    "delivered",
+                }
             ):
                 tracking_provider = None
                 provider_exception = False
