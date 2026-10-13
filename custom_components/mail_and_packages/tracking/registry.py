@@ -1509,7 +1509,12 @@ class PackageRegistry:
             if status == "cleared":
                 continue
             counts["tracked"] += 1
-            if status in ("detected", "in_transit", "out_for_delivery", "ready_for_pickup"):
+            if status in (
+                "detected",
+                "in_transit",
+                "out_for_delivery",
+                "ready_for_pickup",
+            ):
                 counts["in_transit"] += 1
             elif status == "delivered":
                 counts["delivered"] += 1
@@ -1539,7 +1544,8 @@ class PackageRegistry:
                 isinstance(tracking_provider, dict)
                 and tracking_provider.get("status_key") == "not_found"
                 and package.get("carrier_confirmed")
-                and status in {
+                and status
+                in {
                     "in_transit",
                     "out_for_delivery",
                     "ready_for_pickup",
