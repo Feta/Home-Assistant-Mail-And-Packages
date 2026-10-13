@@ -611,3 +611,30 @@ async def test_scan_does_not_resurrect_cleared_tracking(registry, account):
     assert not result.detected
     assert registry.packages["1Z999AA10123456784"]["status"] == "cleared"
     assert registry.is_uid_processed("v7:Packages/123")
+
+
+
+def test_shopify_style_mail_yields_actual_usps_tracking_not_store_order_id():
+    """Storefront order references must not mask a genuine USPS tracking number."""
+    raw = _message(
+        "Order SH140057-MU\\n"
+        "Your order has been delivered\\n"
+        "USPS tracking number: 9249090109401228957014\\n"
+        "Items in this shipment",
+        subject="A shipment from order SH140057-MU has been delivered",
+        sender="updates@moviesunlimited.com",
+    )
+    found = extract_tracking_candidates(raw)
+    assert [(item.carrier, item.tracking_number) for item in found] == [
+        ("usps", "9249090109401228957014"),
+    ]
+
+
+def test_shopify_order_reference_alone_is_not_a_tracking_candidate():
+    """An order identifier is not a carrier parcel without physical tracking."""
+    raw = _message(
+        "Order SH140057-MU\\nYour order is on the way",
+        subject="A shipment from order SH140057-MU is on the way",
+        sender="updates@moviesunlimited.com",
+    )
+    assert extract_tracking_candidates(raw) == []
