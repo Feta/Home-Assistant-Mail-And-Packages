@@ -2,6 +2,17 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b9 - 2026-10-13
+
+### Carrier evidence and pickup-ready lifecycle
+
+- Ignore Shopify/merchant-order parser prefixes as carrier tracking and reject Shopify-style `SH...-XX` order references.
+- Safely move previously persisted Shopify order-reference false positives into the archive with a diagnostic reason, preventing re-detection while preserving history.
+- Preserve real carrier tracking extracted from Shopify-style email and add regression cases for the observed USPS tracking format.
+- Treat legitimate provider lifecycle updates as carrier confirmation, but never treat Not Found as confirmation.
+- Add forward-only `ready_for_pickup` status and corresponding merchant-order aggregate states, with active/in-transit counts and provider synchronization.
+- Expand regression coverage for false identifiers, pickup transitions, and merchant reconciliation.
+
 ## 0.8.0b8 - 2026-09-30
 
 ### Linked package/order self-healing
