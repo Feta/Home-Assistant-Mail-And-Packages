@@ -1358,16 +1358,17 @@ class PackageRegistry:
         return "unknown"
 
     def prune_non_carrier_packages(self) -> int:
-        """Remove legacy marketplace/order identifiers from active package state."""
+        """Remove legacy marketplace/order identifiers from package state."""
         removed = 0
-        for tracking, package in list(self._packages.items()):
-            carrier = str(package.get("carrier") or "").lower()
-            if carrier not in NON_CARRIER_REGISTRY_PREFIXES:
-                continue
-            if package.get("source") == "manual":
-                continue
-            self._packages.pop(tracking, None)
-            removed += 1
+        for package_store in (self._packages, self._archived_packages):
+            for tracking, package in list(package_store.items()):
+                carrier = str(package.get("carrier") or "").lower()
+                if carrier not in NON_CARRIER_REGISTRY_PREFIXES:
+                    continue
+                if package.get("source") == "manual":
+                    continue
+                package_store.pop(tracking, None)
+                removed += 1
         return removed
 
     def reconcile_marketplace_carrier_tracking(
