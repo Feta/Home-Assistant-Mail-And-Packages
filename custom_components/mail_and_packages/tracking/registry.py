@@ -374,6 +374,12 @@ class PackageRegistry:
                 removed += 1
         return removed
 
+    def reset_processed_uids(self) -> int:
+        """Clear scanner UID markers so a bounded historical rescan can reprocess mail."""
+        count = len(self._processed_uids)
+        self._processed_uids.clear()
+        return count
+
     def is_forwarded(
         self,
         tracking_number: str,
