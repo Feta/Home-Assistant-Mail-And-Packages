@@ -1398,9 +1398,7 @@ class PackageRegistry:
                 if carrier == "unknown":
                     continue
                 status = (
-                    "delivered"
-                    if marketplace_tracking in delivered
-                    else "in_transit"
+                    "delivered" if marketplace_tracking in delivered else "in_transit"
                 )
                 if self.register_package(
                     carrier_number,
@@ -1598,7 +1596,8 @@ class PackageRegistry:
                 isinstance(tracking_provider, dict)
                 and tracking_provider.get("status_key") == "not_found"
                 and package.get("carrier_confirmed")
-                and status in {
+                and status
+                in {
                     "in_transit",
                     "out_for_delivery",
                     "ready_for_pickup",
