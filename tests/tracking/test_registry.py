@@ -1001,14 +1001,14 @@ def test_status_rank_ordering():
     assert STATUS_RANK["delivered"] < STATUS_RANK["cleared"]
 
 
-
 @pytest.mark.asyncio
 async def test_shopify_order_id_is_not_a_parcel_and_legacy_record_is_archived(registry):
     """A Shopify store order reference must never be forwarded as tracking."""
     await registry.async_load()
-    assert registry.reconcile_tracking_details(
-        {"shopify_delivering": ["SH140057-MU"]}
-    ) == []
+    assert (
+        registry.reconcile_tracking_details({"shopify_delivering": ["SH140057-MU"]})
+        == []
+    )
     assert not registry.register_package(
         "SH140057-MU", "shopify", "in_transit", source="carrier_email"
     )
@@ -1069,9 +1069,7 @@ async def test_provider_delivered_confirms_an_email_detected_ups_parcel(registry
 async def test_not_found_does_not_confirm_a_carrier(registry):
     """Provider Not Found isn't evidence of a physical parcel."""
     await registry.async_load()
-    registry.register_package(
-        "1ZFAKE", "ups", "detected", source="universal_scan"
-    )
+    registry.register_package("1ZFAKE", "ups", "detected", source="universal_scan")
     registry.reconcile_tracking_provider_packages(
         "seventeentrack",
         "provider-1",
@@ -1131,10 +1129,16 @@ async def test_pickup_ready_synchronizes_single_and_split_merchant_orders(regist
             "ORDER2": {
                 "status": "shipped",
                 "shipments": [
-                    {"tracking_number": tracking, "carrier": "fedex",
-                     "status": "out_for_delivery"},
-                    {"tracking_number": "OTHER", "carrier": "fedex",
-                     "status": "shipped"},
+                    {
+                        "tracking_number": tracking,
+                        "carrier": "fedex",
+                        "status": "out_for_delivery",
+                    },
+                    {
+                        "tracking_number": "OTHER",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                    },
                 ],
             },
         },
