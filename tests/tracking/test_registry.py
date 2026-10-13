@@ -114,6 +114,53 @@ async def test_walmart_order_id_is_not_registered_as_carrier_tracking(registry):
 
 
 @pytest.mark.asyncio
+async def test_shopify_order_id_is_not_registered_as_carrier_tracking(registry):
+    """Shopify order identifiers must not become registry package IDs."""
+    await registry.async_load()
+
+    transitions = registry.reconcile_tracking_details(
+        {"shopify_delivering": ["SH140057-MU"]}
+    )
+
+    assert transitions == []
+    assert registry.packages == {}
+
+
+@pytest.mark.asyncio
+async def test_shopify_embedded_usps_tracking_is_registered(registry):
+    """A physical carrier number embedded in Shopify mail should win."""
+    await registry.async_load()
+
+    changes = registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": "9249090109401228957014"}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+
+    assert changes == 1
+    assert "SH140057-MU" not in registry.packages
+    package = registry.packages["9249090109401228957014"]
+    assert package["carrier"] == "usps"
+    assert package["status"] == "delivered"
+    assert package["source"] == "marketplace_email"
+    assert package["source_from"] == "shopify"
+
+
+@pytest.mark.asyncio
+async def test_prunes_legacy_shopify_package_identifier(registry):
+    """Upgrade cleanup should remove persisted synthetic Shopify package IDs."""
+    await registry.async_load()
+    registry.register_package(
+        "SH140057-MU",
+        "shopify",
+        "in_transit",
+        source="carrier_email",
+    )
+
+    assert registry.prune_non_carrier_packages() == 1
+    assert registry.packages == {}
+
+
+@pytest.mark.asyncio
 async def test_counts_and_coordinator_data(registry):
     """Registry should expose dashboard-friendly summary data."""
     await registry.async_load()
@@ -157,6 +204,52 @@ async def test_provider_enrichment_advances_lifecycle(registry):
     assert package["status"] == "delivered"
     assert package["tracking_provider"]["provider"] == "seventeentrack"
     assert package["tracking_provider"]["location"] == "Hartford, CT"
+
+
+@pytest.mark.asyncio
+async def test_provider_lifecycle_confirms_carrier(registry):
+    """A real provider lifecycle response should confirm the carrier tracking ID."""
+    await registry.async_load()
+    registry.register_package("1Z102EA20392913980", "ups", "detected")
+
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [{"tracking_number": "1Z102EA20392913980", "status": "Delivered"}],
+    )
+
+    package = registry.packages["1Z102EA20392913980"]
+    assert package["status"] == "delivered"
+    assert package["carrier_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_provider_pickup_state_advances_out_for_delivery(registry):
+    """Pickup-ready provider state should be first-class and monotonic."""
+    await registry.async_load()
+    registry.register_package(
+        "878543630829",
+        "fedex",
+        "out_for_delivery",
+        source="carrier_email",
+    )
+
+    _, transitions = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "entry-1",
+        [
+            {
+                "tracking_number": "878543630829",
+                "status": "Ready to be Picked Up",
+            }
+        ],
+    )
+
+    package = registry.get_packages_list()[0]
+    assert package["status"] == "ready_for_pickup"
+    assert package["tracking_provider"]["status_key"] == "ready_for_pickup"
+    assert transitions[0]["status"] == "ready_for_pickup"
+    assert registry.get_counts()["in_transit"] == 1
 
 
 @pytest.mark.asyncio
