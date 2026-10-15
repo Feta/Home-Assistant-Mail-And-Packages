@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -16,14 +17,19 @@ STATUS_RANK = {
     "detected": 0,
     "in_transit": 1,
     "out_for_delivery": 2,
-    "delivered": 3,
-    "cleared": 4,
+    "ready_for_pickup": 3,
+    "delivered": 4,
+    "cleared": 5,
 }
 
 PROVIDER_STATUS_LIFECYCLE = {
     "in_transit": "in_transit",
     "out_for_delivery": "out_for_delivery",
-    "ready_to_be_picked_up": "in_transit",
+    "ready_to_be_picked_up": "ready_for_pickup",
+    "ready_for_pickup": "ready_for_pickup",
+    "available_for_pickup": "ready_for_pickup",
+    "pickup": "ready_for_pickup",
+    "pick_up": "ready_for_pickup",
     "delivered": "delivered",
 }
 PROVIDER_EXCEPTION_STATUSES = {
@@ -32,7 +38,8 @@ PROVIDER_EXCEPTION_STATUSES = {
     "undelivered",
 }
 PROVIDER_NOT_FOUND_GRACE_HOURS = 48
-NON_CARRIER_REGISTRY_PREFIXES = {"walmart"}
+NON_CARRIER_REGISTRY_PREFIXES = {"walmart", "shopify"}
+SHOPIFY_ORDER_REFERENCE = re.compile(r"^SH\d+-[A-Z]{2,4}$", re.IGNORECASE)
 
 
 class PackageRegistry:
@@ -90,6 +97,7 @@ class PackageRegistry:
             if package.get("carrier_confirmed") and package.get("status") in {
                 "in_transit",
                 "out_for_delivery",
+                "ready_for_pickup",
                 "delivered",
             }:
                 return False
@@ -227,6 +235,8 @@ class PackageRegistry:
         if not tracking:
             return False
         carrier = str(carrier or "unknown").strip().lower()
+        if carrier == "shopify" and SHOPIFY_ORDER_REFERENCE.fullmatch(tracking):
+            return False
         now = datetime.now(UTC).isoformat()
 
         if tracking in self._archived_packages:
@@ -434,6 +444,7 @@ class PackageRegistry:
                 "detected",
                 "in_transit",
                 "out_for_delivery",
+                "ready_for_pickup",
             ):
                 continue
             if self.is_forwarded(tracking, provider, config_entry_id):
@@ -615,6 +626,13 @@ class PackageRegistry:
                 remote,
                 now,
             )
+            # Recognized provider lifecycle evidence confirms real carrier tracking.
+            # Not Found/alert statuses must never count as carrier confirmation.
+            if lifecycle is not None and not package.get("carrier_confirmed"):
+                package["carrier_confirmed"] = True
+                package["last_updated"] = now
+                changed_count += 1
+
             changed_count += int(
                 self._apply_provider_metadata(package, provider_metadata, now)
             )
@@ -663,8 +681,10 @@ class PackageRegistry:
             "in_transit": 2,
             "partially_out_for_delivery": 3,
             "out_for_delivery": 4,
-            "partially_delivered": 5,
-            "delivered": 6,
+            "partially_ready_for_pickup": 5,
+            "ready_for_pickup": 6,
+            "partially_delivered": 7,
+            "delivered": 8,
         }.get(str(status or "").lower(), 0)
 
     @classmethod
@@ -953,6 +973,7 @@ class PackageRegistry:
         return {
             "delivered": "delivered",
             "out_for_delivery": "out_for_delivery",
+            "ready_for_pickup": "ready_for_pickup",
             "in_transit": "in_transit",
         }.get(package_status, "shipped")
 
@@ -969,6 +990,10 @@ class PackageRegistry:
             return "delivered"
         if "delivered" in statuses:
             return "partially_delivered"
+        if "ready_for_pickup" in statuses:
+            if all(status == "ready_for_pickup" for status in statuses):
+                return "ready_for_pickup"
+            return "partially_ready_for_pickup"
         if "out_for_delivery" in statuses:
             if all(status == "out_for_delivery" for status in statuses):
                 return "out_for_delivery"
@@ -1402,6 +1427,24 @@ class PackageRegistry:
             return "stale_order"
         return None
 
+    def archive_invalid_merchant_references(self) -> int:
+        """Suppress legacy Shopify order IDs wrongly imported as carrier parcels."""
+        changed = 0
+        now = datetime.now(UTC).isoformat()
+        for tracking, package in list(self._packages.items()):
+            if str(package.get("carrier") or "").lower() != "shopify":
+                continue
+            if not SHOPIFY_ORDER_REFERENCE.fullmatch(tracking):
+                continue
+            self._archived_packages[tracking] = {
+                **package,
+                "archived_at": now,
+                "archive_reason": "merchant_order_reference",
+            }
+            del self._packages[tracking]
+            changed += 1
+        return changed
+
     def auto_expire(
         self,
         delivered_days: int = 3,
@@ -1411,7 +1454,7 @@ class PackageRegistry:
         """Archive completed records and remove stale unconfirmed detections."""
         now = datetime.now(UTC)
         now_iso = now.isoformat()
-        changed = 0
+        changed = self.archive_invalid_merchant_references()
 
         for tracking, package in list(self._packages.items()):
             action = self._package_expiry_action(
@@ -1466,7 +1509,12 @@ class PackageRegistry:
             if status == "cleared":
                 continue
             counts["tracked"] += 1
-            if status in ("detected", "in_transit", "out_for_delivery"):
+            if status in (
+                "detected",
+                "in_transit",
+                "out_for_delivery",
+                "ready_for_pickup",
+            ):
                 counts["in_transit"] += 1
             elif status == "delivered":
                 counts["delivered"] += 1
@@ -1485,6 +1533,7 @@ class PackageRegistry:
                 "detected",
                 "in_transit",
                 "out_for_delivery",
+                "ready_for_pickup",
             ):
                 continue
             if status_filter not in (None, "in_transit") and status != status_filter:
@@ -1495,7 +1544,13 @@ class PackageRegistry:
                 isinstance(tracking_provider, dict)
                 and tracking_provider.get("status_key") == "not_found"
                 and package.get("carrier_confirmed")
-                and status in {"in_transit", "out_for_delivery", "delivered"}
+                and status
+                in {
+                    "in_transit",
+                    "out_for_delivery",
+                    "ready_for_pickup",
+                    "delivered",
+                }
             ):
                 tracking_provider = None
                 provider_exception = False

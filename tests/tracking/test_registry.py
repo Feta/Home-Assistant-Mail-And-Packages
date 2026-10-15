@@ -999,3 +999,165 @@ def test_status_rank_ordering():
     assert STATUS_RANK["in_transit"] < STATUS_RANK["out_for_delivery"]
     assert STATUS_RANK["out_for_delivery"] < STATUS_RANK["delivered"]
     assert STATUS_RANK["delivered"] < STATUS_RANK["cleared"]
+
+
+@pytest.mark.asyncio
+async def test_shopify_order_id_is_not_a_parcel_and_legacy_record_is_archived(registry):
+    """A Shopify store order reference must never be forwarded as tracking."""
+    await registry.async_load()
+    assert (
+        registry.reconcile_tracking_details({"shopify_delivering": ["SH140057-MU"]})
+        == []
+    )
+    assert not registry.register_package(
+        "SH140057-MU", "shopify", "in_transit", source="carrier_email"
+    )
+    assert registry.packages == {}
+
+    # Simulate the b8 record persisted before carrier-prefix filtering.
+    registry.packages["SH140057-MU"] = {
+        "carrier": "shopify",
+        "status": "in_transit",
+        "first_seen": datetime.now(UTC).isoformat(),
+        "last_updated": datetime.now(UTC).isoformat(),
+        "carrier_confirmed": True,
+        "sources": [{"source": "carrier_email"}],
+    }
+    assert registry.auto_expire() == 1
+    assert "SH140057-MU" not in registry.packages
+    invalid = registry.archived_packages["SH140057-MU"]
+    assert invalid["archive_reason"] == "merchant_order_reference"
+    assert invalid["carrier"] == "shopify"
+    assert not registry.register_package(
+        "SH140057-MU", "shopify", "in_transit", source="carrier_email"
+    )
+    assert registry.auto_expire() == 0
+
+
+@pytest.mark.asyncio
+async def test_real_usps_tracking_from_shopify_mail_is_preserved(registry):
+    """Filtering storefront order IDs must not suppress the actual USPS parcel."""
+    await registry.async_load()
+    registry.reconcile_tracking_details(
+        {
+            "shopify_delivering": ["SH140057-MU"],
+            "usps_delivered": ["9249090109401228957014"],
+        }
+    )
+    assert set(registry.packages) == {"9249090109401228957014"}
+    assert registry.packages["9249090109401228957014"]["status"] == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_provider_delivered_confirms_an_email_detected_ups_parcel(registry):
+    """Real provider delivery evidence should set the carrier-confirmed flag."""
+    await registry.async_load()
+    registry.register_package(
+        "1Z102EA20392913980", "ups", "detected", source="universal_scan"
+    )
+    changes, transitions = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "provider-1",
+        [{"tracking_number": "1Z102EA20392913980", "status": "Delivered"}],
+    )
+    assert changes > 0
+    assert transitions[0]["status"] == "delivered"
+    assert registry.packages["1Z102EA20392913980"]["carrier_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_not_found_does_not_confirm_a_carrier(registry):
+    """Provider Not Found isn't evidence of a physical parcel."""
+    await registry.async_load()
+    registry.register_package("1ZFAKE", "ups", "detected", source="universal_scan")
+    registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "provider-1",
+        [{"tracking_number": "1ZFAKE", "status": "Not Found"}],
+    )
+    assert registry.packages["1ZFAKE"]["carrier_confirmed"] is False
+
+
+@pytest.mark.asyncio
+async def test_pickup_ready_overrides_out_for_delivery_then_delivers(registry):
+    """Ready for pickup is a forward-only lifecycle, not in transit."""
+    await registry.async_load()
+    tracking = "878543630829"
+    registry.register_package(tracking, "fedex", "out_for_delivery")
+    changes, transitions = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "provider-1",
+        [{"tracking_number": tracking, "status": "Ready to be Picked Up"}],
+    )
+    assert changes > 0
+    assert transitions[0]["status"] == "ready_for_pickup"
+    assert registry.packages[tracking]["status"] == "ready_for_pickup"
+    assert registry.packages[tracking]["carrier_confirmed"] is True
+    assert registry.get_counts()["in_transit"] == 1
+    assert len(registry.get_packages_list("in_transit")) == 1
+
+    _, repeated = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "provider-1",
+        [{"tracking_number": tracking, "status": "In Transit"}],
+    )
+    assert repeated == []
+    assert registry.packages[tracking]["status"] == "ready_for_pickup"
+
+    _, delivered = registry.reconcile_tracking_provider_packages(
+        "seventeentrack",
+        "provider-1",
+        [{"tracking_number": tracking, "status": "Delivered"}],
+    )
+    assert delivered[0]["status"] == "delivered"
+    assert registry.get_counts()["delivered"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pickup_ready_synchronizes_single_and_split_merchant_orders(registry):
+    """Pickup status should survive package-to-merchant reconciliation."""
+    await registry.async_load()
+    tracking = "878543630829"
+    registry.reconcile_merchant_orders(
+        "Store",
+        {
+            "ORDER1": {
+                "status": "out_for_delivery",
+                "tracking_number": tracking,
+                "carrier": "fedex",
+            },
+            "ORDER2": {
+                "status": "shipped",
+                "shipments": [
+                    {
+                        "tracking_number": tracking,
+                        "carrier": "fedex",
+                        "status": "out_for_delivery",
+                    },
+                    {
+                        "tracking_number": "OTHER",
+                        "carrier": "fedex",
+                        "status": "shipped",
+                    },
+                ],
+            },
+        },
+    )
+    registry.register_package(tracking, "fedex", "ready_for_pickup")
+    registry.enrich_package_merchant(
+        tracking, {"merchant": "Store", "order_id": "ORDER1"}
+    )
+    assert registry.sync_tracking_status_to_merchant_order(tracking)
+    assert registry.merchant_orders["store:ORDER1"]["status"] == "ready_for_pickup"
+
+    # Re-link the same parcel to a second representative split shipment.
+    registry.enrich_package_merchant(
+        tracking, {"merchant": "Store", "order_id": "ORDER2"}
+    )
+    assert registry.sync_tracking_status_to_merchant_order(tracking)
+    assert registry.merchant_orders["store:ORDER2"]["status"] == (
+        "partially_ready_for_pickup"
+    )
+    assert registry.merchant_orders["store:ORDER2"]["shipments"][0]["status"] == (
+        "ready_for_pickup"
+    )
