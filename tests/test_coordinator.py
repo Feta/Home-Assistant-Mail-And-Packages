@@ -1893,7 +1893,6 @@ async def test_mail_scan_lock_serializes_overlapping_scans(hass):
     assert maximum == 1
 
 
-
 @pytest.mark.asyncio
 async def test_marketplace_carrier_mapping_survives_dashboard_deduplication(hass):
     """Carrier mapping must reach the registry before dashboard code discards it."""
@@ -1931,9 +1930,7 @@ async def test_marketplace_carrier_mapping_survives_dashboard_deduplication(hass
     assert "shopify_carrier_tracking" not in data
     assert tracking_details["shopify_delivered"] == []
     captured = coordinator._update_package_registry.await_args.args
-    assert captured[3] == {
-        "shopify": {"SH140057-MU": "9249090109401228957014"}
-    }
+    assert captured[3] == {"shopify": {"SH140057-MU": "9249090109401228957014"}}
     assert captured[4] == {"shopify_delivered": ["SH140057-MU"]}
 
 
