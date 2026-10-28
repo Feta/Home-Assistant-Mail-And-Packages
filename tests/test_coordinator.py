@@ -1891,3 +1891,79 @@ async def test_mail_scan_lock_serializes_overlapping_scans(hass):
         coordinator.process_emails(hass, FAKE_CONFIG_DATA),
     )
     assert maximum == 1
+
+
+
+@pytest.mark.asyncio
+async def test_marketplace_carrier_mapping_survives_dashboard_deduplication(hass):
+    """Carrier mapping must reach the registry before dashboard code discards it."""
+    config = {**FAKE_CONFIG_DATA}
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, config)
+    tracking_details = {
+        "shopify_delivered": ["SH140057-MU"],
+        "usps_delivered": ["9249090109401228957014"],
+    }
+    shipper_data = {
+        "shopify_carrier_tracking": {"SH140057-MU": "9249090109401228957014"},
+        "_tracking_details": tracking_details,
+    }
+    coordinator._setup_image_config = AsyncMock(return_value=config)
+    coordinator._get_imap_connection = AsyncMock(return_value=MagicMock())
+    coordinator._update_shippers = AsyncMock(return_value=shipper_data)
+    coordinator._apply_tracking_state = MagicMock()
+    coordinator._latch_mail_delivered = MagicMock()
+    coordinator._update_package_registry = AsyncMock()
+    coordinator._async_scan_universal_tracking = AsyncMock()
+    coordinator._aggregate_package_counts = MagicMock()
+    coordinator.email_cache = MagicMock()
+    coordinator.email_cache.async_load = AsyncMock()
+    coordinator.email_cache.async_purge_expired = AsyncMock()
+    coordinator.email_cache.async_save = AsyncMock()
+
+    with patch(
+        "custom_components.mail_and_packages.coordinator.logout",
+        new_callable=AsyncMock,
+    ):
+        data = await coordinator.process_emails(hass, config)
+
+    # Public-facing data keeps the old de-duplicated Shopify counts.
+    assert "shopify_carrier_tracking" not in data
+    assert tracking_details["shopify_delivered"] == []
+    captured = coordinator._update_package_registry.await_args.args
+    assert captured[3] == {
+        "shopify": {"SH140057-MU": "9249090109401228957014"}
+    }
+    assert captured[4] == {"shopify_delivered": ["SH140057-MU"]}
+
+
+@pytest.mark.asyncio
+async def test_marketplace_registry_changes_trigger_persistence(hass):
+    """A carrier mapping updates storage even when no shipper transitions change."""
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, FAKE_CONFIG_DATA)
+    registry = MagicMock()
+    registry.async_load = AsyncMock()
+    registry.reconcile_tracking_details.return_value = []
+    registry.reconcile_marketplace_carrier_tracking.return_value = 1
+    registry.reconcile_amazon_orders.return_value = 0
+    registry.reconcile_linked_package_statuses.return_value = 0
+    registry.auto_expire.return_value = 0
+    registry.coordinator_data.return_value = {"registry_tracked": 1}
+    registry.async_save = AsyncMock()
+    coordinator.registry = registry
+
+    data = {}
+    await coordinator._update_package_registry(
+        data,
+        {},
+        {},
+        {"shopify": {"SH140057-MU": "9249090109401228957014"}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+    registry.reconcile_marketplace_carrier_tracking.assert_called_once_with(
+        {"shopify": {"SH140057-MU": "9249090109401228957014"}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+    registry.async_save.assert_awaited_once()
+    assert data["registry_tracked"] == 1
