@@ -270,7 +270,10 @@ async def _handle_rescan_registry(hass: HomeAssistant, call: ServiceCall) -> Non
     """Recheck recent carrier/merchant mail without changing saved settings."""
     days = call.data["days"]
     await asyncio.gather(
-        *(coordinator.async_rescan_registry(days) for coordinator in _registry_coordinators(hass))
+        *(
+            coordinator.async_rescan_registry(days)
+            for coordinator in _registry_coordinators(hass)
+        )
     )
 
 
