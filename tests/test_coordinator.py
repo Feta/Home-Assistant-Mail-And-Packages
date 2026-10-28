@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mail_and_packages.const import (
+    CONF_AMAZON_DAYS,
+    CONF_CUSTOM_DAYS,
     CONF_FOLDER,
     CONF_FORWARD_TO_SEVENTEENTRACK,
     DOMAIN,
@@ -1798,3 +1800,94 @@ async def test_sum_delivered_and_delivering_counts_helpers(hass):
     }
     assert sum_delivered_counts(data) == 5
     assert sum_delivering_counts(data) == 5
+
+
+@pytest.mark.asyncio
+async def test_explicit_registry_rescan_preserves_options_and_uid_history(hass):
+    """Historical refresh widens only this scan and leaves UID dedupe alone."""
+    config = {**FAKE_CONFIG_DATA, CONF_CUSTOM_DAYS: 3, CONF_AMAZON_DAYS: 3}
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, config)
+    registry = MagicMock()
+    coordinator.registry = registry
+    coordinator.process_emails = AsyncMock(return_value={"registry_tracked": 2})
+    coordinator._async_forward_registry_packages = AsyncMock()
+    coordinator._binary_sensor_update = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+
+    result = await coordinator.async_rescan_registry(14)
+
+    assert result["registry_tracked"] == 2
+    used_config = coordinator.process_emails.await_args.args[1]
+    assert used_config[CONF_CUSTOM_DAYS] == 14
+    assert used_config[CONF_AMAZON_DAYS] == 14
+    assert coordinator.config[CONF_CUSTOM_DAYS] == 3
+    assert coordinator.config[CONF_AMAZON_DAYS] == 3
+    assert "oauth_token" not in used_config
+    registry.reset_processed_uids.assert_not_called()
+    coordinator._async_forward_registry_packages.assert_awaited_once()
+    coordinator.async_set_updated_data.assert_called_once_with({"registry_tracked": 2})
+
+
+@pytest.mark.asyncio
+async def test_explicit_rescan_is_bounded_and_skips_disabled_registry(hass):
+    """Do not scan if registry is disabled; clamp historical window."""
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, FAKE_CONFIG_DATA)
+    coordinator.process_emails = AsyncMock(return_value={"registry_tracked": 1})
+
+    assert await coordinator.async_rescan_registry(14) == {}
+    coordinator.process_emails.assert_not_awaited()
+
+    coordinator.registry = MagicMock()
+    coordinator._async_forward_registry_packages = AsyncMock()
+    coordinator._binary_sensor_update = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+    await coordinator.async_rescan_registry(100)
+    assert coordinator.process_emails.await_args.args[1][CONF_CUSTOM_DAYS] == 30
+    await coordinator.async_rescan_registry(0)
+    assert coordinator.process_emails.await_args.args[1][CONF_CUSTOM_DAYS] == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_rescan_does_not_persist_oauth_credentials(hass):
+    """Use a fresh OAuth token in the temporary scan config only."""
+    config = {**FAKE_CONFIG_DATA, CONF_CUSTOM_DAYS: 3, CONF_AMAZON_DAYS: 3}
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, config)
+    coordinator.registry = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config["auth_type"] = "oauth2"
+    coordinator._async_oauth_access_token = AsyncMock(return_value="test-token")
+    coordinator.process_emails = AsyncMock(return_value={})
+
+    await coordinator.async_rescan_registry(7)
+
+    used = coordinator.process_emails.await_args.args[1]
+    assert used["oauth_token"] == "test-token"
+    assert "oauth_token" not in coordinator.config
+    assert coordinator.config[CONF_CUSTOM_DAYS] == 3
+
+
+@pytest.mark.asyncio
+async def test_mail_scan_lock_serializes_overlapping_scans(hass):
+    """A scheduled refresh must not race a manual rescan for shared IMAP state."""
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coordinator = MailDataUpdateCoordinator(hass, FAKE_CONFIG_DATA)
+    active = 0
+    maximum = 0
+
+    async def simulated_scan(_hass, _config):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return {}
+
+    coordinator._process_emails_unlocked = simulated_scan
+    await asyncio.gather(
+        coordinator.process_emails(hass, FAKE_CONFIG_DATA),
+        coordinator.process_emails(hass, FAKE_CONFIG_DATA),
+    )
+    assert maximum == 1

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -10,6 +11,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mail_and_packages import (
+    _register_registry_services,
     async_migrate_entry,
     async_remove_config_entry_device,
     async_setup_entry,
@@ -1084,3 +1086,27 @@ async def test_update_listener_options_change_triggers_reload():
 
     # async_reload SHOULD be called
     mock_hass.config_entries.async_reload.assert_called_once_with("test_entry")
+
+
+@pytest.mark.asyncio
+async def test_rescan_service_is_registered_and_bounded(hass):
+    """The opt-in service forwards valid windows without a full reload."""
+    _register_registry_services(hass)
+    _register_registry_services(hass)
+    assert hass.services.has_service(DOMAIN, "rescan_registry")
+    coordinator = MagicMock()
+    coordinator.async_rescan_registry = AsyncMock()
+
+    with patch(
+        "custom_components.mail_and_packages._registry_coordinators",
+        return_value=[coordinator],
+    ):
+        await hass.services.async_call(
+            DOMAIN, "rescan_registry", {"days": 14}, blocking=True
+        )
+        coordinator.async_rescan_registry.assert_awaited_once_with(14)
+
+        schema = hass.services.async_services()[DOMAIN]["rescan_registry"].schema
+        with pytest.raises(vol.Invalid):
+            schema({"days": 31})
+        coordinator.async_rescan_registry.assert_awaited_once()

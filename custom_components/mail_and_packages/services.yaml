@@ -85,3 +85,21 @@ attach_tracking:
       default: unknown
       selector:
         text:
+
+rescan_registry:
+  name: Rescan Package Registry
+  description: >-
+    Re-check recent carrier and merchant emails without changing the normal
+    lookback configuration or clearing previously processed UID records.
+    The universal scanner still skips previously processed messages.
+  fields:
+    days:
+      name: Days Back
+      description: Historical mail lookback for this scan only (1-30 days).
+      required: false
+      default: 14
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
