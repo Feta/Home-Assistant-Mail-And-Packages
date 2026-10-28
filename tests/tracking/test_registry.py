@@ -1161,3 +1161,95 @@ async def test_pickup_ready_synchronizes_single_and_split_merchant_orders(regist
     assert registry.merchant_orders["store:ORDER2"]["shipments"][0]["status"] == (
         "ready_for_pickup"
     )
+
+
+@pytest.mark.asyncio
+async def test_marketplace_usps_tracking_preserves_physical_carrier_and_order_reference(
+    registry,
+):
+    """A Shopify store order ID must resolve to its physical USPS parcel."""
+    await registry.async_load()
+    changes = registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": "9249090109401228957014"}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+    assert changes == 1
+    assert "SH140057-MU" not in registry.packages
+    package = registry.packages["9249090109401228957014"]
+    assert package["carrier"] == "usps"
+    assert package["status"] == "delivered"
+    assert package["source"] == "marketplace_email"
+    assert package["source_from"] == "shopify"
+    assert {
+        "source": "marketplace_email",
+        "source_from": "shopify",
+        "source_id": "SH140057-MU",
+    } in package["sources"]
+
+
+@pytest.mark.asyncio
+async def test_marketplace_mapping_ignores_unmatched_ids_and_unsafe_numbers(registry):
+    """Only source-matched, physical tracking identifiers can enter the registry."""
+    await registry.async_load()
+    changes = registry.reconcile_marketplace_carrier_tracking(
+        {
+            "shopify": {
+                "SH140057-MU": "SH140057-MU",
+                "SH140058-MU": "1Z102EA20392913980",
+                "SH140059-MU": "9249090109401228957014",
+            },
+            "unrecognized": {"ORDER": "1Z102EA20392913980"},
+        },
+        {"shopify_delivering": ["SH140057-MU", "SH140058-MU"]},
+    )
+    assert changes == 1
+    assert set(registry.packages) == {"1Z102EA20392913980"}
+    assert registry.packages["1Z102EA20392913980"]["carrier"] == "ups"
+    assert registry.packages["1Z102EA20392913980"]["status"] == "in_transit"
+
+
+@pytest.mark.asyncio
+async def test_marketplace_mapping_reuses_existing_package_without_downgrading(
+    registry,
+):
+    """Identical carrier numbers should deduplicate, not regress lifecycle."""
+    await registry.async_load()
+    tracking = "9249090109401228957014"
+    registry.register_package(tracking, "usps", "delivered", source="carrier_email")
+    changes = registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": tracking}},
+        {"shopify_delivering": ["SH140057-MU"]},
+    )
+    assert changes == 1  # Newly retained provenance.
+    assert len(registry.packages) == 1
+    assert registry.packages[tracking]["status"] == "delivered"
+    assert registry.packages[tracking]["carrier_confirmed"]
+    assert len(registry.packages[tracking]["sources"]) == 2
+    assert not registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": tracking}},
+        {"shopify_delivering": ["SH140057-MU"]},
+    )
+
+
+@pytest.mark.asyncio
+async def test_marketplace_mapping_respects_cleared_and_archived_packages(registry):
+    """Marketplace evidence cannot resurrect cleared/archived tracking."""
+    await registry.async_load()
+    tracking = "9249090109401228957014"
+    registry.register_package(tracking, "usps", "in_transit")
+    registry.clear_package(tracking)
+    result = registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": tracking}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+    assert result == 0
+    assert registry.packages[tracking]["status"] == "cleared"
+
+    del registry.packages[tracking]
+    registry.archived_packages[tracking] = {"carrier": "usps", "status": "delivered"}
+    result = registry.reconcile_marketplace_carrier_tracking(
+        {"shopify": {"SH140057-MU": tracking}},
+        {"shopify_delivered": ["SH140057-MU"]},
+    )
+    assert result == 0
+    assert tracking not in registry.packages
