@@ -145,6 +145,8 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         self._hash_cache = {}
         self._in_transit_tracking: dict[str, dict[str, str]] = {}
         self._mail_delivered_latch_state = MailDeliveredLatchState()
+        # Scheduled scans and explicit backfills share one IMAP cache and registry.
+        self._mail_scan_lock = asyncio.Lock()
         self.email_cache = EmailCache(hass=hass)
         self.registry = (
             PackageRegistry(hass, config_entry.entry_id)
@@ -246,7 +248,40 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             await self._binary_sensor_update(data)
         return self._data
 
+    async def async_rescan_registry(self, days: int = 14) -> dict:
+        """Run a bounded historical refresh with temporary lookback settings.
+
+        Processed UID markers remain intact, so normal scans and deduplication
+        remain unchanged. Carrier and merchant parsers re-check the longer
+        window; the universal scanner still handles only unseen UIDs.
+        """
+        if self.registry is None:
+            return self._data
+
+        bounded_days = max(1, min(int(days), 30))
+        config = dict(self.config)
+        config[CONF_CUSTOM_DAYS] = bounded_days
+        config[const.CONF_AMAZON_DAYS] = bounded_days
+
+        auth_type = config.get(CONF_AUTH_TYPE, AUTH_TYPE_PASSWORD)
+        if auth_type != AUTH_TYPE_PASSWORD and self.config_entry:
+            config["oauth_token"] = await self._async_oauth_access_token(auth_type)
+
+        async with asyncio.timeout(self.timeout):
+            data = await self.process_emails(self.hass, config)
+        if data:
+            await self._async_forward_registry_packages(data)
+            self._data = data
+            await self._binary_sensor_update(data)
+            self.async_set_updated_data(data)
+        return self._data
+
     async def process_emails(self, hass: HomeAssistant, config: dict) -> dict:
+        """Serialize all mail scans to protect shared cache and registry state."""
+        async with self._mail_scan_lock:
+            return await self._process_emails_unlocked(hass, config)
+
+    async def _process_emails_unlocked(self, hass: HomeAssistant, config: dict) -> dict:
         """Process emails and update sensors."""
         # Initialize defaults and image paths
         data = self._initialize_data()
