@@ -388,7 +388,7 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         )
         data.update(self.registry.coordinator_data())
 
-        if transitions or amazon_changes or linked_status_changes or expired:
+        if transitions or marketplace_changes or amazon_changes or linked_status_changes or expired:
             await self.registry.async_save()
 
         for transition in transitions:
