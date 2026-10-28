@@ -1843,6 +1843,9 @@ async def test_explicit_rescan_is_bounded_and_skips_disabled_registry(hass):
     coordinator.process_emails.assert_not_awaited()
 
     coordinator.registry = MagicMock()
+    coordinator._async_forward_registry_packages = AsyncMock()
+    coordinator._binary_sensor_update = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
     await coordinator.async_rescan_registry(100)
     assert coordinator.process_emails.await_args.args[1][CONF_CUSTOM_DAYS] == 30
     await coordinator.async_rescan_registry(0)
