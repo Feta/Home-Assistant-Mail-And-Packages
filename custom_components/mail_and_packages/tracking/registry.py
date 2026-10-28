@@ -1400,6 +1400,7 @@ class PackageRegistry:
                     status=status,
                     source="marketplace_email",
                     source_from=marketplace,
+                    source_id=reference,
                 ):
                     changed += 1
         return changed
