@@ -370,10 +370,12 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
 
         await self.registry.async_load()
         transitions = self.registry.reconcile_tracking_details(tracking_details)
-        marketplace_changes = self.registry.reconcile_marketplace_carrier_tracking(
-            marketplace_carrier_tracking or {},
-            marketplace_tracking_details or {},
-        )
+        marketplace_changes = 0
+        if marketplace_carrier_tracking:
+            marketplace_changes = self.registry.reconcile_marketplace_carrier_tracking(
+                marketplace_carrier_tracking,
+                marketplace_tracking_details or {},
+            )
         amazon_changes = self.registry.reconcile_amazon_orders(amazon_orders or {})
         linked_status_changes = self.registry.reconcile_linked_package_statuses()
         expired = self.registry.auto_expire(
