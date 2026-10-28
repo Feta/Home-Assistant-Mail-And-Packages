@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -10,11 +11,11 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mail_and_packages import (
+    _register_registry_services,
     async_migrate_entry,
     async_remove_config_entry_device,
     async_setup_entry,
     update_listener,
-    _register_registry_services,
 )
 from custom_components.mail_and_packages.const import (
     CONF_AMAZON_DOMAIN,
@@ -1106,8 +1107,7 @@ async def test_rescan_service_is_registered_and_bounded(hass):
         )
         coordinator.async_rescan_registry.assert_awaited_once_with(14)
 
-        with pytest.raises(Exception):
-            await hass.services.async_call(
-                DOMAIN, "rescan_registry", {"days":31}, blocking=True
-            )
+        schema = hass.services.async_services()[DOMAIN]["rescan_registry"].schema
+        with pytest.raises(vol.Invalid):
+            schema({"days": 31})
         coordinator.async_rescan_registry.assert_awaited_once()
