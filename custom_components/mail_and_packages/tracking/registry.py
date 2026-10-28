@@ -1340,6 +1340,70 @@ class PackageRegistry:
             for number in numbers:
                 self.set_exception(number, True)
 
+    @classmethod
+    def _infer_marketplace_carrier(cls, tracking_number: str) -> str | None:
+        """Recognize physical-carrier formats, not arbitrary store order IDs."""
+        tracking = cls.normalize_tracking_number(tracking_number)
+        if re.fullmatch(r"1Z[0-9A-Z]{16}", tracking):
+            return "ups"
+        if re.fullmatch(r"9[2345]\\d{15,26}", tracking):
+            return "usps"
+        if re.fullmatch(r"TBA\\d{12}", tracking):
+            return "amazon"
+        if re.fullmatch(r"(?:JJD|JD)\\d{8,18}", tracking):
+            return "dhl"
+        if re.fullmatch(r"\\d{12}|\\d{15}|\\d{20}|\\d{22}", tracking):
+            return "fedex"
+        return None
+
+    def reconcile_marketplace_carrier_tracking(
+        self,
+        mappings: dict[str, dict[str, str]],
+        tracking_details: dict[str, list[str]],
+    ) -> int:
+        """Register confirmed-format carrier IDs extracted from marketplace mail.
+
+        Marketplace IDs are used only to match same-scan shipment statuses;
+        they are never registered as package tracking numbers.
+        """
+        changed = 0
+        for marketplace, mapping in mappings.items():
+            if marketplace not in {"etsy", "shopify", "home_depot"}:
+                continue
+            if not isinstance(mapping, dict):
+                continue
+            delivering = {
+                self.normalize_tracking_number(value)
+                for value in tracking_details.get(f"{marketplace}_delivering", [])
+                if isinstance(value, str) and value.strip()
+            }
+            delivered = {
+                self.normalize_tracking_number(value)
+                for value in tracking_details.get(f"{marketplace}_delivered", [])
+                if isinstance(value, str) and value.strip()
+            }
+            for marketplace_id, carrier_number in mapping.items():
+                if not isinstance(carrier_number, str) or not isinstance(
+                    marketplace_id, str
+                ):
+                    continue
+                reference = self.normalize_tracking_number(marketplace_id)
+                if reference not in delivering | delivered:
+                    continue
+                carrier = self._infer_marketplace_carrier(carrier_number)
+                if carrier is None:
+                    continue
+                status = "delivered" if reference in delivered else "in_transit"
+                if self.register_package(
+                    carrier_number,
+                    carrier,
+                    status=status,
+                    source="marketplace_email",
+                    source_from=marketplace,
+                ):
+                    changed += 1
+        return changed
+
     def reconcile_tracking_details(
         self, tracking_details: dict[str, list[str]]
     ) -> list[dict[str, Any]]:
