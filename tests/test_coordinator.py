@@ -1802,7 +1802,6 @@ async def test_sum_delivered_and_delivering_counts_helpers(hass):
     assert sum_delivering_counts(data) == 5
 
 
-
 @pytest.mark.asyncio
 async def test_explicit_registry_rescan_preserves_options_and_uid_history(hass):
     """Historical refresh widens only this scan and leaves UID dedupe alone."""
@@ -1827,9 +1826,7 @@ async def test_explicit_registry_rescan_preserves_options_and_uid_history(hass):
     assert "oauth_token" not in used_config
     registry.reset_processed_uids.assert_not_called()
     coordinator._async_forward_registry_packages.assert_awaited_once()
-    coordinator.async_set_updated_data.assert_called_once_with(
-        {"registry_tracked": 2}
-    )
+    coordinator.async_set_updated_data.assert_called_once_with({"registry_tracked": 2})
 
 
 @pytest.mark.asyncio
