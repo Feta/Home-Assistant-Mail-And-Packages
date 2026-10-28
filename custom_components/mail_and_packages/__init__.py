@@ -266,8 +266,30 @@ async def _handle_attach_tracking(
         hass.async_create_task(coordinator.async_request_refresh())
 
 
+async def _handle_rescan_registry(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Recheck recent carrier/merchant mail without changing saved settings."""
+    days = call.data["days"]
+    await asyncio.gather(
+        *(coordinator.async_rescan_registry(days) for coordinator in _registry_coordinators(hass))
+    )
+
+
 def _register_registry_services(hass: HomeAssistant) -> None:
     """Register package-registry management services once."""
+    if not hass.services.has_service(DOMAIN, "rescan_registry"):
+        hass.services.async_register(
+            DOMAIN,
+            "rescan_registry",
+            partial(_handle_rescan_registry, hass),
+            schema=vol.Schema(
+                {
+                    vol.Optional("days", default=14): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=30)
+                    )
+                }
+            ),
+        )
+
     if hass.services.has_service(DOMAIN, "clear_package"):
         return
 
