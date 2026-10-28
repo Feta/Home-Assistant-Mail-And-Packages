@@ -2,6 +2,27 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b10 - 2026-10-28
+
+### Safe historical rescan
+
+- Add the opt-in Home Assistant action `mail_and_packages.rescan_registry` with a temporary 1–30-day email lookback (14 days by default).
+- Keep the saved general and Amazon lookback settings unchanged after a manual scan.
+- Retain previously processed universal-scanner UID markers, preserving existing deduplication and avoiding a wholesale reprocess; regular marketplace/carrier parsers can still inspect the longer search window.
+- Serialize overlapping mail scans to protect the shared IMAP cache and registry, with regression coverage for OAuth, service validation, and scan locking.
+
+### Marketplace physical carrier reconciliation
+
+- Preserve temporary marketplace-to-carrier tracking mappings before dashboard deduplication removes them.
+- Register recognizable physical carrier numbers from Shopify, Etsy, and Home Depot messages as packages instead of treating marketplace order references as physical tracking.
+- Keep the corresponding marketplace reference in package source provenance; do not resurrect cleared or archived shipments or downgrade delivered packages.
+- Add regression tests for storefront-reference filtering, real USPS/UPS tracking, duplicates, lifecycle preservation, and persistence.
+
+### Notes
+
+- Historical rescan does not force a reparse of universal-scanner messages whose UIDs are already recorded as processed.
+- This prerelease preserves existing dashboards and regular 3-day mail lookback settings; verify behavior in Home Assistant after updating.
+
 ## 0.8.0b9 - 2026-10-13
 
 ### Carrier evidence and pickup-ready lifecycle
