@@ -1088,7 +1088,6 @@ async def test_update_listener_options_change_triggers_reload():
     mock_hass.config_entries.async_reload.assert_called_once_with("test_entry")
 
 
-
 @pytest.mark.asyncio
 async def test_rescan_service_is_registered_and_bounded(hass):
     """The opt-in service forwards valid windows without a full reload."""
@@ -1103,7 +1102,7 @@ async def test_rescan_service_is_registered_and_bounded(hass):
         return_value=[coordinator],
     ):
         await hass.services.async_call(
-            DOMAIN, "rescan_registry", {"days":14}, blocking=True
+            DOMAIN, "rescan_registry", {"days": 14}, blocking=True
         )
         coordinator.async_rescan_registry.assert_awaited_once_with(14)
 
