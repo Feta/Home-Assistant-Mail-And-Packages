@@ -1163,7 +1163,6 @@ async def test_pickup_ready_synchronizes_single_and_split_merchant_orders(regist
     )
 
 
-
 @pytest.mark.asyncio
 async def test_marketplace_usps_tracking_preserves_physical_carrier_and_order_reference(
     registry,
@@ -1210,7 +1209,9 @@ async def test_marketplace_mapping_ignores_unmatched_ids_and_unsafe_numbers(regi
 
 
 @pytest.mark.asyncio
-async def test_marketplace_mapping_reuses_existing_package_without_downgrading(registry):
+async def test_marketplace_mapping_reuses_existing_package_without_downgrading(
+    registry,
+):
     """Identical carrier numbers should deduplicate, not regress lifecycle."""
     await registry.async_load()
     tracking = "9249090109401228957014"
