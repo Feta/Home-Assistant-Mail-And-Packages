@@ -1346,13 +1346,13 @@ class PackageRegistry:
         tracking = cls.normalize_tracking_number(tracking_number)
         if re.fullmatch(r"1Z[0-9A-Z]{16}", tracking):
             return "ups"
-        if re.fullmatch(r"9[2345]\\d{15,26}", tracking):
+        if re.fullmatch(r"9[2345]\d{15,26}", tracking):
             return "usps"
-        if re.fullmatch(r"TBA\\d{12}", tracking):
+        if re.fullmatch(r"TBA\d{12}", tracking):
             return "amazon"
-        if re.fullmatch(r"(?:JJD|JD)\\d{8,18}", tracking):
+        if re.fullmatch(r"(?:JJD|JD)\d{8,18}", tracking):
             return "dhl"
-        if re.fullmatch(r"\\d{12}|\\d{15}|\\d{20}|\\d{22}", tracking):
+        if re.fullmatch(r"\d{12}|\d{15}|\d{20}|\d{22}", tracking):
             return "fedex"
         return None
 
