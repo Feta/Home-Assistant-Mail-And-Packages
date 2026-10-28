@@ -309,6 +309,20 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
             tracking_details = shipper_data.pop("_tracking_details", {})
             amazon_orders = shipper_data.pop(const.AMAZON_REGISTRY_ORDERS, {})
             data.update(shipper_data)
+            # Deduplication removes these temporary parser mappings. Capture
+            # them first so the registry can retain genuine carrier numbers.
+            marketplace_carrier_tracking = {
+                prefix: dict(data.get(f"{prefix}_carrier_tracking") or {})
+                for prefix in const.MARKETPLACE_CARRIER_TRACKING
+                if isinstance(data.get(f"{prefix}_carrier_tracking"), dict)
+            }
+            marketplace_tracking_details = {
+                key: list(numbers)
+                for prefix in marketplace_carrier_tracking
+                for key, numbers in tracking_details.items()
+                if key in {f"{prefix}_delivering", f"{prefix}_delivered"}
+                and isinstance(numbers, list)
+            }
             self._dedupe_marketplace_duplicates(data, tracking_details)
             self._apply_tracking_state(data, tracking_details, today_iso)
             self._latch_mail_delivered(data, today_iso)
@@ -316,6 +330,8 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
                 data,
                 tracking_details,
                 amazon_orders,
+                marketplace_carrier_tracking,
+                marketplace_tracking_details,
             )
             await self._async_scan_universal_tracking(
                 account,
@@ -345,6 +361,8 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
         data: dict,
         tracking_details: dict[str, list[str]],
         amazon_orders: dict[str, dict] | None = None,
+        marketplace_carrier_tracking: dict[str, dict[str, str]] | None = None,
+        marketplace_tracking_details: dict[str, list[str]] | None = None,
     ) -> None:
         """Reconcile carrier tracking and merchant metadata into the registry."""
         if self.registry is None:
@@ -352,6 +370,10 @@ class MailDataUpdateCoordinator(DataUpdateCoordinator):
 
         await self.registry.async_load()
         transitions = self.registry.reconcile_tracking_details(tracking_details)
+        marketplace_changes = self.registry.reconcile_marketplace_carrier_tracking(
+            marketplace_carrier_tracking or {},
+            marketplace_tracking_details or {},
+        )
         amazon_changes = self.registry.reconcile_amazon_orders(amazon_orders or {})
         linked_status_changes = self.registry.reconcile_linked_package_statuses()
         expired = self.registry.auto_expire(
