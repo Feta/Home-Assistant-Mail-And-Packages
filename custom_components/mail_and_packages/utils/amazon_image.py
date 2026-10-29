@@ -6,9 +6,9 @@ import email
 import logging
 import re
 from html import unescape
-from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from aioimaplib import IMAP4_SSL
