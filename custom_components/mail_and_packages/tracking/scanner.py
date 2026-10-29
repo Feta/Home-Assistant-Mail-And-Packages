@@ -311,8 +311,6 @@ def _amazon_merchant_metadata(
         metadata["order_id"] = order_match.group(0)
     if status := _amazon_status(subject, message):
         metadata["status"] = status
-        if status in {"shipped", "out_for_delivery", "delivered"}:
-            metadata["action_required"] = False
 
     if AMAZON_ACTION_REQUIRED_PATTERN.search(combined):
         metadata["action_required"] = True
