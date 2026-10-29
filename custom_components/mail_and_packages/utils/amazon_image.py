@@ -5,6 +5,8 @@ from __future__ import annotations
 import email
 import logging
 import re
+from html import unescape
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -24,19 +26,52 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
+def _validated_amazon_image_url(url: str) -> str | None:
+    """Return a safe Amazon S3 image URL, or None for untrusted destinations.
+
+    The hostname must come from the parsed URL, not a regex capture from
+    email HTML. An allowlisted host before an @ is userinfo, not the destination.
+    Reject control characters and backslashes as well.
+    """
+    if not isinstance(url, str):
+        return None
+    normalized = unescape(url)
+    if "\\" in normalized or any(
+        ord(char) < 32 or ord(char) == 127 for char in normalized
+    ):
+        return None
+    try:
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in AMAZON_IMG_LIST
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            return None
+    except ValueError:
+        return None
+    return normalized
+
+
 async def download_amazon_img(
     img_url: str,
     img_path: str,
     img_name: str,
     hass: Any,
 ) -> None:
-    """Download image from url."""
+    """Download an approved Amazon delivery image without following redirects."""
+    safe_url = _validated_amazon_image_url(img_url)
+    if safe_url is None:
+        _LOGGER.warning("Skipping Amazon delivery image with unapproved destination")
+        return
     img_path_obj = Path(img_path) / "amazon"
     filepath = img_path_obj / img_name
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
-            async with session.get(img_url.replace("&amp;", "&")) as resp:
+            async with session.get(safe_url, allow_redirects=False) as resp:
                 if resp.status != 200:
                     return
                 content_type = resp.headers.get("content-type", "")
@@ -75,9 +110,9 @@ def _extract_amazon_urls_from_msg(
         part_content = part_payload.decode("utf-8", "ignore")
         for url in pattern.findall(part_content):
             if url[1] in AMAZON_IMG_LIST:
-                full_url = url[0] + url[1] + url[2]
-                if full_url not in urls:
-                    urls.append(full_url)
+                safe_url = _validated_amazon_image_url(url[0] + url[1] + url[2])
+                if safe_url and safe_url not in urls:
+                    urls.append(safe_url)
     return urls
 
 
