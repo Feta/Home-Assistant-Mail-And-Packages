@@ -8,9 +8,6 @@ import re
 from typing import Any
 
 from custom_components.mail_and_packages import const
-from custom_components.mail_and_packages.utils.amazon_image import (
-    _validated_amazon_image_url,
-)
 from custom_components.mail_and_packages.const import (
     AMAZON_DELIVERING_SUBJECT,
     AMAZON_EXCEPTION_BODY,
@@ -24,6 +21,9 @@ from custom_components.mail_and_packages.utils.amazon import (
     extract_order_numbers,
     get_decoded_subject,
     get_email_body,
+)
+from custom_components.mail_and_packages.utils.amazon_image import (
+    _validated_amazon_image_url,
 )
 
 _LOGGER = logging.getLogger(__name__)
