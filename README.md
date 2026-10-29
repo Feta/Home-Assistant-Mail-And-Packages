@@ -9,7 +9,9 @@
 
 ## About this fork
 
-**Current beta:** `0.8.0b6`
+**Latest published beta:** [`0.8.0b11`](https://github.com/Feta/Home-Assistant-Mail-And-Packages/releases/tag/0.8.0b11)
+
+This is the latest GitHub release, not necessarily the version currently installed in Home Assistant. Check the installed version in HACS before updating.
 
 The original **Mail and Packages** integration connects to your email account and creates Home Assistant sensors for mail and package activity. This fork preserves that functionality while adding an optional, persistent package-tracking pipeline designed to keep package history and tracking metadata useful beyond a single day's email scan.
 
