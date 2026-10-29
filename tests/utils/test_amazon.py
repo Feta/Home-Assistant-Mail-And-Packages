@@ -25,6 +25,9 @@ from custom_components.mail_and_packages.utils.amazon import (
     get_html_body,
     search_amazon_emails,
 )
+from custom_components.mail_and_packages.utils.amazon_image import (
+    _validated_amazon_image_url,
+)
 from custom_components.mail_and_packages.utils.cache import EmailCache
 
 
@@ -211,7 +214,7 @@ def test_amazon_email_addresses_various_fwds():
 async def test_download_amazon_img_success(hass, tmp_path):
     """Test download_amazon_img success path (Lines 174-185)."""
 
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -239,7 +242,7 @@ async def test_download_amazon_img_client_error(hass, tmp_path, caplog):
     """Test download_amazon_img with aiohttp error (Line 184)."""
 
     caplog.set_level("ERROR")
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -379,7 +382,7 @@ def test_get_email_body_attribute_error():
 @pytest.mark.asyncio
 async def test_download_amazon_img_non_200_status(hass, tmp_path):
     """Test download_amazon_img returns early when HTTP status is not 200 (line 220)."""
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -402,7 +405,7 @@ async def test_download_amazon_img_non_200_status(hass, tmp_path):
 @pytest.mark.asyncio
 async def test_download_amazon_img_non_image_content_type(hass, tmp_path):
     """Test download_amazon_img returns early when content-type is not image (line 223)."""
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -426,7 +429,7 @@ async def test_download_amazon_img_non_image_content_type(hass, tmp_path):
 @pytest.mark.asyncio
 async def test_download_amazon_img_content_length_too_large(hass, tmp_path, caplog):
     """Test download_amazon_img returns early when content-length exceeds limit (lines 226-230)."""
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -455,7 +458,7 @@ async def test_download_amazon_img_content_length_too_large(hass, tmp_path, capl
 @pytest.mark.asyncio
 async def test_download_amazon_img_body_exceeds_size_limit(hass, tmp_path, caplog):
     """Test download_amazon_img returns early when downloaded data exceeds limit (lines 54-57)."""
-    img_url = "https://example.com/test.jpg"
+    img_url = "https://us-prod-temp.s3.amazonaws.com/test.jpg"
     img_path = str(tmp_path)
     img_name = "test.jpg"
 
@@ -672,3 +675,84 @@ def test_extract_amazon_order_details():
 
     # Nothing extractable
     assert extract_amazon_order_details("Delivery update", "", None) is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://us-prod-temp.s3.amazonaws.com/photo.jpg", True),
+        ("https://gb-prod-temp.s3.eu-west-1.amazonaws.com/photo.jpg?token=a&amp;b=c", True),
+        ("https://US-PROD-TEMP.S3.AMAZONAWS.COM/photo.jpg", True),
+        ("https://us-prod-temp.s3.amazonaws.com:443/photo.jpg", True),
+        ("http://us-prod-temp.s3.amazonaws.com/photo.jpg", False),
+        ("https://us-prod-temp.s3.amazonaws.com@example.org/photo.jpg", False),
+        ("https://example.org@us-prod-temp.s3.amazonaws.com/photo.jpg", False),
+        ("https://us-prod-temp.s3.amazonaws.com.evil.example/photo.jpg", False),
+        ("https://127.0.0.1/photo.jpg", False),
+        ("https://169.254.169.254/latest/meta-data/", False),
+        ("https://us-prod-temp.s3.amazonaws.com:8443/photo.jpg", False),
+        ("https://us-prod-temp.s3.amazonaws.com:invalid/photo.jpg", False),
+        ("https://us-prod-temp.s3.amazonaws.com\\\\@example.org/photo.jpg", False),
+        ("https://us-prod-temp.s3.amazonaws.com\\n@example.org/photo.jpg", False),
+        ("https://[invalid/photo.jpg", False),
+    ],
+)
+def test_amazon_image_url_destination_allowlist(url, expected):
+    """Only real Amazon S3 destinations are accepted, never userinfo tricks."""
+    result = _validated_amazon_image_url(url)
+    assert (result is not None) is expected
+
+
+def test_amazon_image_extraction_rejects_disguised_destination():
+    """The extracted host can be correct while the real URL host is not."""
+    pattern = re.compile(rf"{AMAZON_IMG_PATTERN}")
+    msg = email.message_from_string(
+        "Content-Type: text/html\\n\\n"
+        '<img src="https://us-prod-temp.s3.amazonaws.com@example.org/image.jpg">'
+        '<img src="https://us-prod-temp.s3.amazonaws.com/real.jpg">'
+    )
+    assert _extract_amazon_urls_from_msg(msg, pattern) == [
+        "https://us-prod-temp.s3.amazonaws.com/real.jpg"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "https://us-prod-temp.s3.amazonaws.com@127.0.0.1/image.jpg",
+        "https://example.org@us-prod-temp.s3.amazonaws.com/image.jpg",
+        "http://us-prod-temp.s3.amazonaws.com/image.jpg",
+        "https://us-prod-temp.s3.amazonaws.com:8080/image.jpg",
+    ],
+)
+async def test_amazon_image_download_rejects_untrusted_url(hass, tmp_path, unsafe_url):
+    """Untrusted URLs must not make any network request."""
+    with patch("aiohttp.ClientSession.get") as mock_get:
+        await download_amazon_img(unsafe_url, str(tmp_path), "blocked.jpg", hass)
+    mock_get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_amazon_image_download_disables_redirects(hass, tmp_path):
+    """Even an allowed S3 URL may not redirect to another host."""
+    mock_resp = AsyncMock()
+    mock_resp.status = 302
+    mock_resp.headers = {"Location": "http://127.0.0.1/admin"}
+    mock_get_context = MagicMock()
+    mock_get_context.__aenter__.return_value = mock_resp
+    mock_get_context.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch("aiohttp.ClientSession.get", return_value=mock_get_context) as mock_get,
+        patch("custom_components.mail_and_packages.utils.amazon_image.io_save_file") as mock_save,
+    ):
+        await download_amazon_img(
+            "https://us-prod-temp.s3.amazonaws.com/image.jpg",
+            str(tmp_path),
+            "image.jpg",
+            hass,
+        )
+    mock_get.assert_called_once_with(
+        "https://us-prod-temp.s3.amazonaws.com/image.jpg", allow_redirects=False
+    )
+    mock_save.assert_not_called()
