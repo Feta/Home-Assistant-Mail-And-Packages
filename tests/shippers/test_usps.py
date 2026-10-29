@@ -873,9 +873,7 @@ async def test_usps_jpeg_attachment_skips_announcements(hass, name):
     with patch(
         "custom_components.mail_and_packages.shippers.usps.image.io_save_file"
     ) as mock_save:
-        count, images = await shipper._extract_jpeg_attachment(
-            part, "test/", 0, []
-        )
+        count, images = await shipper._extract_jpeg_attachment(part, "test/", 0, [])
     assert count == 0
     assert not images
     mock_save.assert_not_called()
@@ -898,9 +896,7 @@ async def test_usps_jpeg_attachment_never_uses_email_filename(hass, tmp_path):
             return_value="safe-random.jpg",
         ),
     ):
-        count, images = await shipper._extract_jpeg_attachment(
-            part, str(output), 0, []
-        )
+        count, images = await shipper._extract_jpeg_attachment(part, str(output), 0, [])
     assert count == 1
     assert images == [str(output / "safe-random.jpg")]
     assert mock_save.call_args.args[0] == output / "safe-random.jpg"
@@ -916,9 +912,7 @@ async def test_usps_jpeg_attachment_skips_invalid_payload(hass):
     with patch(
         "custom_components.mail_and_packages.shippers.usps.image.io_save_file"
     ) as mock_save:
-        count, images = await shipper._extract_jpeg_attachment(
-            part, "test/", 0, []
-        )
+        count, images = await shipper._extract_jpeg_attachment(part, "test/", 0, [])
     assert count == 0
     assert images == []
     mock_save.assert_not_called()
