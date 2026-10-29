@@ -8,6 +8,9 @@ import re
 from typing import Any
 
 from custom_components.mail_and_packages import const
+from custom_components.mail_and_packages.utils.amazon_image import (
+    _validated_amazon_image_url,
+)
 from custom_components.mail_and_packages.const import (
     AMAZON_DELIVERING_SUBJECT,
     AMAZON_EXCEPTION_BODY,
@@ -80,9 +83,9 @@ def _extract_amazon_image_urls(msg: email.message.Message) -> list[str]:
             for url in found:
                 if url[1] not in const.AMAZON_IMG_LIST:
                     continue
-                full_url = url[0] + url[1] + url[2]
-                if full_url not in urls:
-                    urls.append(full_url)
+                safe_url = _validated_amazon_image_url(url[0] + url[1] + url[2])
+                if safe_url and safe_url not in urls:
+                    urls.append(safe_url)
     return urls
 
 
