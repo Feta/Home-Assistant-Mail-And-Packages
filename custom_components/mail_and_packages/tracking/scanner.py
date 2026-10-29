@@ -54,8 +54,14 @@ AMAZON_ARRIVING_WEEKDAY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 AMAZON_ARRIVING_DATE_PATTERN = re.compile(
-    r"\bArriving\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?[,]?\s*"
+    r"\b(?:now\s+arriving|arriving|expected\s+by|new\s+delivery\s+date\s*:)\s+"
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?"
     r"([A-Za-z]{3,9})\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
+AMAZON_ACTION_REQUIRED_PATTERN = re.compile(
+    r"\b(?:approval\s+(?:needed|required)|approve\s+(?:the\s+)?delay|"
+    r"requires?\s+(?:your\s+)?approval)\b",
     re.IGNORECASE,
 )
 
@@ -242,9 +248,9 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
         return (sent + timedelta(days=(target - sent.weekday()) % 7)).isoformat()
 
     lower = body.lower()
-    if "arriving tomorrow" in lower:
+    if re.search(r"\b(?:now\s+)?arriving\s+tomorrow\b", lower):
         return (sent + timedelta(days=1)).isoformat()
-    if "arriving today" in lower:
+    if re.search(r"\b(?:now\s+)?arriving\s+today\b", lower):
         return sent.isoformat()
     return None
 
@@ -305,6 +311,12 @@ def _amazon_merchant_metadata(
         metadata["order_id"] = order_match.group(0)
     if status := _amazon_status(subject, message):
         metadata["status"] = status
+        if status in {"shipped", "out_for_delivery", "delivered"}:
+            metadata["action_required"] = False
+
+    if AMAZON_ACTION_REQUIRED_PATTERN.search(combined):
+        metadata["action_required"] = True
+        metadata["attention_reason"] = "approval_required"
 
     metadata.update(_item_count_metadata(AMAZON_ITEM_COUNT_PATTERN, combined))
     if expected := _amazon_expected_delivery(message, combined):
