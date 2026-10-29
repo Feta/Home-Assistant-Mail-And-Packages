@@ -505,7 +505,7 @@ async def test_get_tracking_with_cache():
     assert result == ["1Z1234567890123456"]
 
 
-def test_walmart_delivery_photo_accepts_jpeg_and_png():
+def test_walmart_delivery_photo_accepts_jpeg_and_png(tmp_path):
     """Walmart CID photos can be delivered in either format."""
     for subtype in ("jpeg", "png"):
         msg = MIMEMultipart("related")
@@ -519,7 +519,7 @@ def test_walmart_delivery_photo_accepts_jpeg_and_png():
         ) as mock_save:
             matched = generic_delivery_image_extraction(
                 msg.as_bytes(),
-                "/tmp/",
+                str(tmp_path),
                 "delivery.jpg",
                 "walmart",
                 ["png", "jpeg"],
@@ -529,7 +529,7 @@ def test_walmart_delivery_photo_accepts_jpeg_and_png():
             mock_save.assert_called_once()
 
 
-def test_walmart_delivery_base64_accepts_jpeg():
+def test_walmart_delivery_base64_accepts_jpeg(tmp_path):
     """Inline JPEG is accepted under a multi-format Walmart config."""
     msg = (
         b"Content-Type: text/html\\n\\n"
@@ -540,7 +540,7 @@ def test_walmart_delivery_base64_accepts_jpeg():
         return_value=True,
     ) as mock_save:
         matched = generic_delivery_image_extraction(
-            msg, "/tmp/", "delivery.jpg", "walmart", ["png", "jpeg"]
+            msg, str(tmp_path), "delivery.jpg", "walmart", ["png", "jpeg"]
         )
         assert matched is True
         assert mock_save.call_args.args[2] == b"fake_data"
