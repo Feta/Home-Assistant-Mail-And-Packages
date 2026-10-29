@@ -641,7 +641,6 @@ def test_shopify_order_reference_alone_is_not_a_tracking_candidate():
 
 def test_amazon_expected_by_and_updated_delivery_date():
     """Amazon merchant registry recognizes newly stated dates, not old ETAs."""
-    from datetime import datetime
     from email import message_from_bytes
 
     body = "Order 111-1234567-1234567. Now arriving Fri, Oct 30."
