@@ -1,6 +1,7 @@
 """Tests for the local universal tracking-number scanner."""
 
 import asyncio
+from email import message_from_bytes
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -641,8 +642,6 @@ def test_shopify_order_reference_alone_is_not_a_tracking_candidate():
 
 def test_amazon_expected_by_and_updated_delivery_date():
     """Amazon merchant registry recognizes newly stated dates, not old ETAs."""
-    from email import message_from_bytes
-
     body = "Order 111-1234567-1234567. Now arriving Fri, Oct 30."
     msg = _message(
         body, subject="Delivery update: Your order", sender="order-update@amazon.com"
@@ -660,9 +659,10 @@ def test_amazon_expected_by_and_updated_delivery_date():
     )
     parsed_expected = message_from_bytes(expected)
     parsed_expected["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
-    assert extract_merchant_orders(parsed_expected.as_bytes())[0][
-        "expected_delivery"
-    ] == "2026-11-23"
+    assert (
+        extract_merchant_orders(parsed_expected.as_bytes())[0]["expected_delivery"]
+        == "2026-11-23"
+    )
 
 
 def test_amazon_approval_required_then_shipped_clears_flag(registry):
