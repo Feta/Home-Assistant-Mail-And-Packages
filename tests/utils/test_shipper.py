@@ -1,5 +1,7 @@
 """Tests for shipper utilities."""
 
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -501,3 +503,44 @@ async def test_get_tracking_with_cache():
 
     result = await get_tracking("1", mock_acc, "1Z?[0-9A-Z]{16}", cache=cache)
     assert result == ["1Z1234567890123456"]
+
+
+def test_walmart_delivery_photo_accepts_jpeg_and_png():
+    """Walmart CID photos can be delivered in either format."""
+    for subtype in ("jpeg", "png"):
+        msg = MIMEMultipart("related")
+        part = MIMEBase("image", subtype)
+        part.add_header("Content-ID", "<deliveryProofLabel>")
+        part.set_payload(b"synthetic image")
+        msg.attach(part)
+        with patch(
+            "custom_components.mail_and_packages.utils.shipper.save_image_data_to_disk",
+            return_value=True,
+        ) as mock_save:
+            matched = generic_delivery_image_extraction(
+                msg.as_bytes(),
+                "/tmp/",
+                "delivery.jpg",
+                "walmart",
+                ["png", "jpeg"],
+                cid_name="deliveryProofLabel",
+            )
+            assert matched is True
+            mock_save.assert_called_once()
+
+
+def test_walmart_delivery_base64_accepts_jpeg():
+    """Inline JPEG is accepted under a multi-format Walmart config."""
+    msg = (
+        b"Content-Type: text/html\\n\\n"
+        b'<img src="data:image/jpeg;base64,ZmFrZV9kYXRh">'
+    )
+    with patch(
+        "custom_components.mail_and_packages.utils.shipper.save_image_data_to_disk",
+        return_value=True,
+    ) as mock_save:
+        matched = generic_delivery_image_extraction(
+            msg, "/tmp/", "delivery.jpg", "walmart", ["png", "jpeg"]
+        )
+        assert matched is True
+        assert mock_save.call_args.args[2] == b"fake_data"
