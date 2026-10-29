@@ -53,8 +53,14 @@ AMAZON_ARRIVING_WEEKDAY_PATTERN = re.compile(
     r"\bArriving\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",
     re.IGNORECASE,
 )
+AMAZON_UPDATED_DATE_PATTERN = re.compile(
+    r"\b(?:now\s+arriving|new\s+(?:estimated\s+)?delivery\s+date\s*:)\s+"
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?"
+    r"([A-Za-z]{3,9})\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
 AMAZON_ARRIVING_DATE_PATTERN = re.compile(
-    r"\b(?:now\s+arriving|arriving|expected\s+by|new\s+delivery\s+date\s*:)\s+"
+    r"\b(?:arriving|expected\s+by)\s+"
     r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+)?"
     r"([A-Za-z]{3,9})\s+(\d{1,2})\b",
     re.IGNORECASE,
@@ -230,9 +236,19 @@ def _amazon_expected_delivery(message: Any, body: str) -> str | None:
     """Extract a simple Amazon arrival date from common US email wording."""
     sent = _message_datetime(message).date()
 
-    if match := AMAZON_ARRIVING_DATE_PATTERN.search(body):
-        if expected := _date_from_month_day(message, match.group(1), match.group(2)):
-            return expected
+    # A revised date takes priority over an older ETA mentioned in the same
+    # message. Relative "Now arriving" wording also outranks the old date.
+    if re.search(r"\bnow\s+arriving\s+tomorrow\b", body, re.IGNORECASE):
+        return (sent + timedelta(days=1)).isoformat()
+    if re.search(r"\bnow\s+arriving\s+today\b", body, re.IGNORECASE):
+        return sent.isoformat()
+
+    for pattern in (AMAZON_UPDATED_DATE_PATTERN, AMAZON_ARRIVING_DATE_PATTERN):
+        if match := pattern.search(body):
+            if expected := _date_from_month_day(
+                message, match.group(1), match.group(2)
+            ):
+                return expected
 
     if match := AMAZON_ARRIVING_WEEKDAY_PATTERN.search(body):
         weekdays = {
