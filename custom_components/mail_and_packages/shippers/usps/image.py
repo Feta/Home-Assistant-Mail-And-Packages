@@ -81,18 +81,22 @@ async def extract_jpeg_attachment(
     """Extract image from JPEG attachment."""
     _LOGGER.debug("Extracting image from email attachment")
     filename = part.get_filename()
-    junkmail = ["mailer", "content", "package"]
-    if filename is None:
+    # Known non-mail announcements must be excluded BEFORE the filename is
+    # replaced. Never use an email-supplied path on the filesystem.
+    junkmail = ("mailer", "content", "package", "ra_0", "mail attachment.txt")
+    if not filename or any(junk in filename.lower() for junk in junkmail):
         return image_count, images
-    if any(junk in filename for junk in junkmail):
+
+    payload = part.get_payload(decode=True)
+    if not isinstance(payload, bytes) or not payload:
         return image_count, images
 
     try:
-        target_path = Path(image_output_path) / filename
+        target_path = Path(image_output_path) / random_filename()
         await hass.async_add_executor_job(
             io_save_file,
             target_path,
-            part.get_payload(decode=True),
+            payload,
         )
         images.append(str(target_path))
         image_count += 1
