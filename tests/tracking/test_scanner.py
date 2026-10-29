@@ -706,8 +706,7 @@ def test_amazon_updated_eta_takes_precedence_over_old_eta():
     msg = message_from_bytes(raw)
     msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
     assert (
-        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"]
-        == "2026-10-30"
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"] == "2026-10-30"
     )
 
 
@@ -721,6 +720,5 @@ def test_amazon_updated_relative_eta_takes_precedence():
     msg = message_from_bytes(raw)
     msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
     assert (
-        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"]
-        == "2026-10-30"
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"] == "2026-10-30"
     )
