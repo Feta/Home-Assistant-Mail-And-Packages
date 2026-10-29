@@ -852,3 +852,67 @@ async def test_copy_nomail_image_relative_path(hass):
 
         await shipper._copy_nomail_image("test/", "test.gif", relative_path)
         mock_copyfile.assert_called_once_with(expected_resolved_path, "test/test.gif")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ra_0.jpg",
+        "Mail Attachment.txt",
+        "content.jpg",
+        "package.jpg",
+        "mailerProvidedImage.jpg",
+    ],
+)
+async def test_usps_jpeg_attachment_skips_announcements(hass, name):
+    """Announcement attachments are filtered before local naming."""
+    shipper = USPSShipper(hass, {})
+    part = MagicMock()
+    part.get_filename.return_value = name
+    with patch(
+        "custom_components.mail_and_packages.shippers.usps.image.io_save_file"
+    ) as mock_save:
+        count, images = await shipper._extract_jpeg_attachment(part, "test/", 0, [])
+    assert count == 0
+    assert not images
+    mock_save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_usps_jpeg_attachment_never_uses_email_filename(hass, tmp_path):
+    """A crafted email filename cannot escape the configured images directory."""
+    shipper = USPSShipper(hass, {})
+    part = MagicMock()
+    part.get_filename.return_value = "../../sensitive.jpg"
+    part.get_payload.return_value = b"synthetic jpeg bytes"
+    output = tmp_path / "mail"
+    with (
+        patch(
+            "custom_components.mail_and_packages.shippers.usps.image.io_save_file"
+        ) as mock_save,
+        patch(
+            "custom_components.mail_and_packages.shippers.usps.image.random_filename",
+            return_value="safe-random.jpg",
+        ),
+    ):
+        count, images = await shipper._extract_jpeg_attachment(part, str(output), 0, [])
+    assert count == 1
+    assert images == [str(output / "safe-random.jpg")]
+    assert mock_save.call_args.args[0] == output / "safe-random.jpg"
+
+
+@pytest.mark.asyncio
+async def test_usps_jpeg_attachment_skips_invalid_payload(hass):
+    """Missing image data is not written to disk."""
+    shipper = USPSShipper(hass, {})
+    part = MagicMock()
+    part.get_filename.return_value = "scan.jpg"
+    part.get_payload.return_value = None
+    with patch(
+        "custom_components.mail_and_packages.shippers.usps.image.io_save_file"
+    ) as mock_save:
+        count, images = await shipper._extract_jpeg_attachment(part, "test/", 0, [])
+    assert count == 0
+    assert images == []
+    mock_save.assert_not_called()
