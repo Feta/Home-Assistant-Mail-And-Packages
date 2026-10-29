@@ -736,6 +736,8 @@ class PackageRegistry:
             "image",
             "status",
             "expected_delivery",
+            "action_required",
+            "attention_reason",
             "source_domain",
             "item_count",
             "description",
@@ -799,6 +801,10 @@ class PackageRegistry:
             existing = self._archived_merchant_orders.pop(key)
 
         self._preserve_advanced_merchant_status(existing, incoming)
+        if incoming.get("action_required") is False:
+            incoming["attention_reason"] = ""
+        elif incoming.get("action_required") is True:
+            incoming["attention_reason"] = "approval_required"
 
         merged = {
             **self._filter_merchant_fields(existing, allowed),
@@ -806,6 +812,8 @@ class PackageRegistry:
             "merchant": merchant_name,
             "order_id": order_id,
         }
+        if incoming.get("action_required") is False:
+            merged.pop("attention_reason", None)
         incoming_shipments = incoming.get("shipments")
         if isinstance(incoming_shipments, list) and len(incoming_shipments) > 1:
             merged.pop("tracking_number", None)
