@@ -801,9 +801,14 @@ class PackageRegistry:
             existing = self._archived_merchant_orders.pop(key)
 
         self._preserve_advanced_merchant_status(existing, incoming)
-        if incoming.get("action_required") is False:
-            incoming["attention_reason"] = ""
-        elif incoming.get("action_required") is True:
+        prior_attention = bool(existing.get("action_required")) if existing else False
+        updated_status = str(incoming.get("status") or "").lower()
+        if updated_status == "delivered" or (
+            prior_attention
+            and updated_status in {"shipped", "out_for_delivery", "in_transit"}
+        ):
+            incoming["action_required"] = False
+        if incoming.get("action_required") is True:
             incoming["attention_reason"] = "approval_required"
 
         merged = {
