@@ -681,7 +681,10 @@ def test_extract_amazon_order_details():
     ("url", "expected"),
     [
         ("https://us-prod-temp.s3.amazonaws.com/photo.jpg", True),
-        ("https://gb-prod-temp.s3.eu-west-1.amazonaws.com/photo.jpg?token=a&amp;b=c", True),
+        (
+            "https://gb-prod-temp.s3.eu-west-1.amazonaws.com/photo.jpg?token=a&amp;b=c",
+            True,
+        ),
         ("https://US-PROD-TEMP.S3.AMAZONAWS.COM/photo.jpg", True),
         ("https://us-prod-temp.s3.amazonaws.com:443/photo.jpg", True),
         ("http://us-prod-temp.s3.amazonaws.com/photo.jpg", False),
@@ -744,7 +747,9 @@ async def test_amazon_image_download_disables_redirects(hass, tmp_path):
     mock_get_context.__aexit__ = AsyncMock(return_value=False)
     with (
         patch("aiohttp.ClientSession.get", return_value=mock_get_context) as mock_get,
-        patch("custom_components.mail_and_packages.utils.amazon_image.io_save_file") as mock_save,
+        patch(
+            "custom_components.mail_and_packages.utils.amazon_image.io_save_file"
+        ) as mock_save,
     ):
         await download_amazon_img(
             "https://us-prod-temp.s3.amazonaws.com/image.jpg",
