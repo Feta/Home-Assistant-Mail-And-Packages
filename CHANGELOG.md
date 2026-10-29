@@ -2,6 +2,30 @@
 
 This changelog documents fork-specific releases. For the original project history, see the upstream repository at https://github.com/moralmunky/Home-Assistant-Mail-And-Packages.
 
+## 0.8.0b11 - 2026-10-29
+
+### Security hardening
+
+- Validate Amazon delivery-photo URLs against the two previously supported HTTPS S3 hosts, rejecting deceptive hosts, malformed URLs, unsafe ports and credential-bearing URLs. Enforce this validation before downloading and disallow HTTP redirects to avoid SSRF (PR #26).
+- Generate safe local filenames for USPS JPEG attachments rather than trusting email attachment filenames. Skip known announcement attachments and empty/invalid payloads (PR #28).
+
+### Amazon delivery tracking accuracy
+
+- Recognize Amazon `Expected by`, `Now arriving`, and revised delivery dates so updated ETAs appear in merchant order records (PR #27).
+- Normalize timezone-aware Amazon email dates to the local calendar day where applicable.
+- Preserve an `action_required` / `approval_required` attention flag for Amazon approval notices without inventing a shipment state. Clear it after later shipping or delivery notifications.
+
+### Delivery photos and Home Assistant compatibility
+
+- Extract Walmart delivery photos encoded as either PNG or JPEG, including embedded and attached images, without changing other carrier formats (PR #29).
+- Remove a deprecated Home Assistant config-flow connection-class assignment; the integration's existing manifest already specifies `iot_class` (PR #30).
+
+### Update notes
+
+- No automatic Home Assistant update, registry reset, dashboard change, script edit, or configuration migration is included. Existing merchant and package records are preserved.
+- Previously processed universal-scanner messages will not automatically be replayed merely by installing this release. The opt-in historical rescan introduced in b10 preserves processed UID markers; do not reset them globally.
+- Confirm Amazon order dates and delivery photos, Walmart photos, USPS mail images, and package/17TRACK registry lifecycle after upgrading. Back up Home Assistant first and retain the previous prerelease for rollback.
+
 ## 0.8.0b10 - 2026-10-28
 
 ### Safe historical rescan
