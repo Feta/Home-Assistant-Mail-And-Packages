@@ -2331,7 +2331,7 @@ CAMERA_EXTRACTION_CONFIG = {
         "cid_name": "deliveryPhoto",
     },
     "walmart": {
-        "image_type": "png",
+        "image_type": ["png", "jpeg"],
         "cid_name": "deliveryProofLabel",
     },
     "fedex": {
