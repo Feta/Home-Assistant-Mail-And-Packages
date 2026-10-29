@@ -693,3 +693,34 @@ def test_amazon_approval_required_then_shipped_clears_flag(registry):
     assert stored["status"] == "shipped"
     assert stored["action_required"] is False
     assert "attention_reason" not in stored
+
+
+def test_amazon_updated_eta_takes_precedence_over_old_eta():
+    """Revised date wins when the same Amazon mail includes previous ETA."""
+    raw = _message(
+        "Order 111-1234567-1234567 was previously arriving Oct 23. "
+        "Now arriving Fri, Oct 30.",
+        subject="Delivery update: Your order",
+        sender="order-update@amazon.com",
+    )
+    msg = message_from_bytes(raw)
+    msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    assert (
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"]
+        == "2026-10-30"
+    )
+
+
+def test_amazon_updated_relative_eta_takes_precedence():
+    """New relative ETA must win even if an older absolute date appears first."""
+    raw = _message(
+        "Order 111-1234567-1234567 was arriving Oct 23. Now arriving tomorrow.",
+        subject="Delivery update: Your order",
+        sender="order-update@amazon.com",
+    )
+    msg = message_from_bytes(raw)
+    msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    assert (
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"]
+        == "2026-10-30"
+    )
