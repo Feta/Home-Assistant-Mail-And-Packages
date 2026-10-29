@@ -26,7 +26,9 @@ def _image_subtypes(image_type: str | Sequence[str]) -> tuple[str, ...]:
     result: list[str] = []
     for requested_name in requested:
         name = requested_name.lower()
-        aliases = ("jpeg", "jpg", "pjpeg") if name in {"jpeg", "jpg", "pjpeg"} else (name,)
+        aliases = (
+            ("jpeg", "jpg", "pjpeg") if name in {"jpeg", "jpg", "pjpeg"} else (name,)
+        )
         for alias in aliases:
             if alias not in result:
                 result.append(alias)
