@@ -566,6 +566,9 @@ async def test_parse_amazon_arrival_date(hass):
     result_today = await parse_amazon_arrival_date(hass, body_today, email_date)
     assert result_today == email_date
 
+    body_expected_by = "Expected by Fri, Sep 25"
+    assert await parse_amazon_arrival_date(hass, body_expected_by, email_date) == email_date
+
     # 3. English "tomorrow" relative date
     body_tomorrow = "Your order has shipped. Arriving tomorrow by 8 PM."
     result_tomorrow = await parse_amazon_arrival_date(hass, body_tomorrow, email_date)
