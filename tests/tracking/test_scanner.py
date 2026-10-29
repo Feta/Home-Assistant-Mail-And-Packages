@@ -1,6 +1,7 @@
 """Tests for the local universal tracking-number scanner."""
 
 import asyncio
+from email import message_from_bytes
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -637,3 +638,87 @@ def test_shopify_order_reference_alone_is_not_a_tracking_candidate():
         sender="updates@moviesunlimited.com",
     )
     assert extract_tracking_candidates(raw) == []
+
+
+def test_amazon_expected_by_and_updated_delivery_date():
+    """Amazon merchant registry recognizes newly stated dates, not old ETAs."""
+    body = "Order 111-1234567-1234567. Now arriving Fri, Oct 30."
+    msg = _message(
+        body, subject="Delivery update: Your order", sender="order-update@amazon.com"
+    )
+    parsed = message_from_bytes(msg)
+    parsed["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    order = extract_merchant_orders(parsed.as_bytes())[0]
+    assert order["expected_delivery"] == "2026-10-30"
+    assert "action_required" not in order
+
+    expected = _message(
+        "Order 111-1234567-1234567 Expected by Mon, Nov 23",
+        subject="Shipped: Order",
+        sender="shipment-tracking@amazon.com",
+    )
+    parsed_expected = message_from_bytes(expected)
+    parsed_expected["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    assert (
+        extract_merchant_orders(parsed_expected.as_bytes())[0]["expected_delivery"]
+        == "2026-11-23"
+    )
+
+
+def test_amazon_approval_required_then_shipped_clears_flag(registry):
+    """Approval-needed is persisted as an attention flag, not a fake delivery state."""
+    required = _message(
+        "Order 111-1234567-1234567: Approval needed to keep your order open.",
+        subject="Approval required for your Amazon order",
+        sender="order-update@amazon.com",
+    )
+    order = extract_merchant_orders(required)[0]
+    assert order["action_required"] is True
+    assert order["attention_reason"] == "approval_required"
+    assert "status" not in order
+
+    registry.reconcile_merchant_orders("Amazon", {order["order_id"]: order})
+    stored = registry.get_amazon_orders_list()[0]
+    assert stored["action_required"] is True
+    assert stored["attention_reason"] == "approval_required"
+
+    shipped = _message(
+        "Order 111-1234567-1234567 has shipped.",
+        subject="Shipped: Order",
+        sender="shipment-tracking@amazon.com",
+    )
+    shipping = extract_merchant_orders(shipped)[0]
+    registry.reconcile_merchant_orders("Amazon", {shipping["order_id"]: shipping})
+    stored = registry.get_amazon_orders_list()[0]
+    assert stored["status"] == "shipped"
+    assert stored["action_required"] is False
+    assert "attention_reason" not in stored
+
+
+def test_amazon_updated_eta_takes_precedence_over_old_eta():
+    """Revised date wins when the same Amazon mail includes previous ETA."""
+    raw = _message(
+        "Order 111-1234567-1234567 was previously arriving Oct 23. "
+        "Now arriving Fri, Oct 30.",
+        subject="Delivery update: Your order",
+        sender="order-update@amazon.com",
+    )
+    msg = message_from_bytes(raw)
+    msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    assert (
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"] == "2026-10-30"
+    )
+
+
+def test_amazon_updated_relative_eta_takes_precedence():
+    """New relative ETA must win even if an older absolute date appears first."""
+    raw = _message(
+        "Order 111-1234567-1234567 was arriving Oct 23. Now arriving tomorrow.",
+        subject="Delivery update: Your order",
+        sender="order-update@amazon.com",
+    )
+    msg = message_from_bytes(raw)
+    msg["Date"] = "Thu, 29 Oct 2026 09:00:00 -0400"
+    assert (
+        extract_merchant_orders(msg.as_bytes())[0]["expected_delivery"] == "2026-10-30"
+    )
