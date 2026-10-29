@@ -532,8 +532,9 @@ def test_walmart_delivery_photo_accepts_jpeg_and_png(tmp_path):
 def test_walmart_delivery_base64_accepts_jpeg(tmp_path):
     """Inline JPEG is accepted under a multi-format Walmart config."""
     msg = (
-        b"Content-Type: text/html\\n\\n"
-        b'<img src="data:image/jpeg;base64,ZmFrZV9kYXRh">'
+        b"Content-Type: text/html"
+        + bytes((10, 10))
+        + b'<img src="data:image/jpeg;base64,ZmFrZV9kYXRh">'
     )
     with patch(
         "custom_components.mail_and_packages.utils.shipper.save_image_data_to_disk",
