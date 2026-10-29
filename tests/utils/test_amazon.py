@@ -707,7 +707,7 @@ def test_amazon_image_extraction_rejects_disguised_destination():
     """The extracted host can be correct while the real URL host is not."""
     pattern = re.compile(rf"{AMAZON_IMG_PATTERN}")
     msg = email.message_from_string(
-        "Content-Type: text/html\\n\\n"
+        "Content-Type: text/html\n\n"
         '<img src="https://us-prod-temp.s3.amazonaws.com@example.org/image.jpg">'
         '<img src="https://us-prod-temp.s3.amazonaws.com/real.jpg">'
     )
